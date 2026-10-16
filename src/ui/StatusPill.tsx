@@ -22,13 +22,13 @@ const ICON: Record<PlaybackStatus, JSX.Element> = {
 };
 
 /** Playback state shown with an icon and a word, never by color alone. */
-export function StatusPill({ status, compact = false }: { status: PlaybackStatus; compact?: boolean }) {
+export function StatusPill({ status, compact = false, label }: { status: PlaybackStatus; compact?: boolean; label?: string }) {
   return (
     <span className={`status-pill status-pill--${status} ${compact ? "status-pill--compact" : ""}`} data-testid="status">
       <span aria-hidden="true" className="status-pill__icon">
         {ICON[status]}
       </span>
-      <span>{LABEL[status]}</span>
+      <span>{label ?? LABEL[status]}</span>
     </span>
   );
 }

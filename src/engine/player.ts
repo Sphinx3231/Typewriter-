@@ -56,6 +56,47 @@ export interface PlaybackSnapshot {
   recent: { at: number; note: string }[];
   error: string | null;
   bufferRevision: number;
+  /** Set when the output goes to another application instead of the in-app preview. */
+  external?: ExternalInfo;
+}
+
+export type ExternalPhase = "idle" | "waiting" | "countdown" | "typing" | "paused" | "resuming" | "completed" | "stopped" | "failed";
+
+export interface ExternalInfo {
+  phase: ExternalPhase;
+  /** Countdown remaining before the first (or next) keystroke. */
+  countdownMs: number;
+  /** The window receiving the keys, once chosen. */
+  target: { title: string; appName: string } | null;
+  /** Why typing paused, stopped or failed (machine-readable). */
+  reason: string | null;
+  message: string | null;
+  /** "sent" means every key went out; only "verified" means the document was checked. */
+  verification: "not-run" | "sent" | "verified" | "mismatch";
+  verificationDetail: string | null;
+  shortcutRegistered: boolean;
+}
+
+/** What the UI needs from anything that plays a timeline (preview or another app). */
+export interface PlaybackDriver {
+  readonly buffer: TypedBuffer;
+  subscribe(fn: () => void): () => void;
+  getSnapshot(): PlaybackSnapshot;
+  onKeystroke(fn: KeystrokeListener): () => void;
+  getStatus(): PlaybackStatus;
+  getTimeline(): Timeline | null;
+  getSource(): string;
+  getElapsed(): number;
+  load(source: string, timeline: Timeline | null): boolean;
+  start(): boolean;
+  pause(): boolean;
+  resume(): boolean;
+  stop(): boolean;
+  restart(): boolean;
+  reset(): boolean;
+  refresh(): void;
+  /** Whether restarting is possible (not when the text already went into another app). */
+  readonly canRestart: boolean;
 }
 
 export type KeystrokeListener = (event: TypingEvent) => void;
@@ -64,8 +105,9 @@ const RATE_WINDOW_MS = 5000;
 /** Events due within this many ms are applied now; absorbs float rounding in timer arithmetic. */
 const DUE_EPSILON_MS = 0.5;
 
-export class PlaybackController {
+export class PlaybackController implements PlaybackDriver {
   readonly buffer = new TypedBuffer();
+  readonly canRestart = true;
   private timeline: Timeline | null = null;
   private source = "";
   private status: PlaybackStatus = "empty";

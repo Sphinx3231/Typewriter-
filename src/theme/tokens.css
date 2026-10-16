@@ -90,8 +90,9 @@
   --glow-primary: 0 6px 18px -6px rgba(124, 58, 237, 0.55);
   --glow-active: 0 0 0 1px rgba(124, 58, 237, 0.18), 0 10px 30px -14px rgba(124, 58, 237, 0.4);
 
-  --logo-from: #8b5cf6;
-  --logo-to: #06b6d4;
+  /* logo: which half of the supplied artwork to show, and that half's own background */
+  --logo-pos: 0% 0%;
+  --logo-tile: #fefefe;
 
   color-scheme: light;
 }
@@ -151,8 +152,8 @@
   --glow-primary: 0 6px 20px -8px rgba(239, 68, 68, 0.6);
   --glow-active: 0 0 0 1px rgba(239, 68, 68, 0.22), 0 12px 34px -18px rgba(239, 68, 68, 0.45);
 
-  --logo-from: #ef4444;
-  --logo-to: #f97316;
+  --logo-pos: 100% 0%;
+  --logo-tile: #050506;
 
   color-scheme: dark;
 }

@@ -1,6 +1,7 @@
+import type React from "react";
 import { ArrowDown, CheckCircle2, CircleAlert, Keyboard, OctagonX, Pause } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { PlaybackController, PlaybackSnapshot } from "../engine";
+import type { PlaybackDriver, PlaybackSnapshot } from "../engine";
 import { clockDuration, longDuration, nf } from "./format";
 
 const FIX_HIGHLIGHT_MS = 900;
@@ -17,12 +18,15 @@ export function PlaybackSurface({
   estimateMs,
   words,
   blank,
+  guide,
 }: {
-  controller: PlaybackController;
+  controller: PlaybackDriver;
   snapshot: PlaybackSnapshot;
   estimateMs: number;
   words: number;
   blank: boolean;
+  /** Replaces the empty state, e.g. with instructions for typing into another app. */
+  guide?: React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const settledRef = useRef<HTMLSpanElement>(null);
@@ -182,7 +186,9 @@ export function PlaybackSurface({
           <span ref={settledRef} />
           <span ref={activeRef} />
         </div>
-        {!hasOutput ? (
+        {!hasOutput && guide && !blank ? (
+          <div className="paper__empty paper__empty--guide">{guide}</div>
+        ) : !hasOutput ? (
           <div className="paper__empty">
             <span className="paper__empty-icon" aria-hidden="true">
               <Keyboard size={22} />
@@ -213,10 +219,21 @@ export function PlaybackSurface({
           <Pause size={13} aria-hidden="true" /> Paused at {clockDuration(snapshot.elapsedMs)}
         </div>
       ) : null}
-      {status === "completed" ? (
+      {status === "completed" && !snapshot.external ? (
         <div className="paper__badge paper__badge--done" role="status" data-testid="verified-badge">
           <CheckCircle2 size={14} aria-hidden="true" /> Complete · matches your text exactly
         </div>
+      ) : null}
+      {status === "completed" && snapshot.external ? (
+        snapshot.external.verification === "verified" ? (
+          <div className="paper__badge paper__badge--done" role="status">
+            <CheckCircle2 size={14} aria-hidden="true" /> Verified in your document
+          </div>
+        ) : (
+          <div className="paper__badge paper__badge--sent" role="status" data-testid="sent-badge">
+            <CheckCircle2 size={14} aria-hidden="true" /> All keys sent · document not checked yet
+          </div>
+        )
       ) : null}
       {status === "stopped" ? (
         <div className="paper__badge paper__badge--stopped" role="status">

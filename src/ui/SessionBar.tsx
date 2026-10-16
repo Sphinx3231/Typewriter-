@@ -1,9 +1,10 @@
-import { Check, Copy, Pause, Play, RotateCcw, Square } from "lucide-react";
+import { Check, Copy, Keyboard, Pause, Play, RotateCcw, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { PlaybackStatus } from "../engine";
 import type { Session } from "../state/useSession";
 import { Button } from "./controls";
 import { clockDuration, nf, timeOfDay } from "./format";
+import { externalLabel, ExternalStatus } from "./ExternalPanel";
 import { StatusPill } from "./StatusPill";
 
 export async function copyText(text: string): Promise<boolean> {
@@ -57,10 +58,23 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
   const pct = total > 0 ? Math.min(100, (elapsed / total) * 100) : 0;
   const pctLabel = status === "completed" ? 100 : Math.floor(pct);
   const finishAt = playing ? new Date(Date.now() + remaining) : idle && total > 0 ? new Date(Date.now() + total) : null;
-  const canStart = !blank && issues.length === 0;
+  const ext = snapshot.external;
+  const externalMode = session.destination === "external";
+  const arming = !!ext && (ext.phase === "waiting" || ext.phase === "countdown" || ext.phase === "resuming");
+  const canStart = !blank && issues.length === 0 && (!externalMode || session.support.available);
 
   let primary: { label: string; icon: JSX.Element; onClick: () => void; disabled?: boolean; hint: string; testid: string };
-  if (playing) primary = { label: "Pause", icon: <Pause size={17} />, onClick: session.pause, hint: "Space", testid: "btn-pause" };
+  if (arming) primary = { label: "Cancel", icon: <X size={17} />, onClick: session.stop, hint: "Esc", testid: "btn-cancel" };
+  else if (externalMode && !playing && status !== "paused")
+    primary = {
+      label: status === "completed" || status === "stopped" || status === "error" ? "Type again" : "Type into app",
+      icon: <Keyboard size={17} />,
+      onClick: session.start,
+      disabled: !canStart,
+      hint: "Ctrl + Enter",
+      testid: "btn-start",
+    };
+  else if (playing) primary = { label: "Pause", icon: <Pause size={17} />, onClick: session.pause, hint: "Space", testid: "btn-pause" };
   else if (status === "paused") primary = { label: "Resume", icon: <Play size={17} />, onClick: session.resume, hint: "Space", testid: "btn-resume" };
   else if (status === "completed" || status === "stopped" || status === "error")
     primary = { label: "Start again", icon: <Play size={17} />, onClick: session.start, disabled: !canStart, hint: "Ctrl + Enter", testid: "btn-start" };
@@ -69,7 +83,7 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
   return (
     <section className={`session-bar session-bar--${status} ${playing ? "is-playing" : ""}`} aria-label="Playback controls and progress">
       <div className="session-bar__top">
-        <StatusPill status={status} />
+        <StatusPill status={status} label={ext ? externalLabel(ext) : undefined} />
         <span className="session-bar__time" aria-hidden="true">
           {clockDuration(elapsed)} · {clockDuration(remaining)} left
         </span>
@@ -138,8 +152,12 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
         <Button
           icon={<RotateCcw size={16} />}
           onClick={session.restart}
-          disabled={!(playing || status === "paused" || status === "completed" || status === "stopped") || !canStart}
-          title="Restart from the beginning"
+          disabled={!controller.canRestart || !(playing || status === "paused" || status === "completed" || status === "stopped") || !canStart}
+          title={
+            controller.canRestart
+              ? "Restart from the beginning"
+              : "Not available when typing into another app: what's already typed there would be duplicated. Undo it in your document, then type again."
+          }
           data-testid="btn-restart"
         >
           Restart
@@ -161,7 +179,7 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
             setCopied(true);
           }}
           disabled={status !== "completed"}
-          title={status === "completed" ? "Copy the finished text" : "Available when typing is complete"}
+          title={status === "completed" ? "Copy your original text" : "Available when typing is complete"}
           data-testid="btn-copy"
         >
           {copied ? "Copied" : "Copy text"}
@@ -173,15 +191,22 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
           : status === "paused"
             ? `Paused at ${pctLabel} percent.`
             : status === "completed"
-              ? "Typing complete. The output matches your text exactly."
+              ? ext
+                ? ext.verification === "verified"
+                  ? "Typing complete and verified in your document."
+                  : "Every key was sent. The document text hasn't been verified."
+                : "Typing complete. The output matches your text exactly."
               : status === "stopped"
                 ? `Stopped at ${pctLabel} percent.`
                 : status === "error"
                   ? snapshot.error ?? "Playback error."
                   : ""}
       </p>
+      {ext && ext.phase !== "idle" ? <ExternalStatus session={session} /> : null}
       {!canStart && idle ? (
-        <p className="session-bar__hint">{blank ? "Add some text to start." : issues[0]?.message}</p>
+        <p className="session-bar__hint">
+          {blank ? "Add some text to start." : issues[0]?.message ?? (externalMode ? session.support.message : null)}
+        </p>
       ) : session.settingsChangedSinceStart ? (
         <p className="session-bar__hint">Settings changed. Restart to type with the new settings.</p>
       ) : null}

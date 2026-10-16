@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Typewriter's main window and its status window.",
+  "windows": ["main", "hud"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-set-theme",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus"
+  ]
+}

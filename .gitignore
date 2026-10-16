@@ -8,3 +8,6 @@ playwright-report/
 *.log
 .DS_Store
 .vite/
+tsconfig.tsbuildinfo
+target/
+src-tauri/gen/

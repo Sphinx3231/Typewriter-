@@ -172,9 +172,26 @@ kbd {
   gap: 10px;
 }
 .logo-mark {
+  --logo-size: 44px;
+  position: relative;
   flex: none;
-  border-radius: 9px;
-  box-shadow: 0 6px 16px -8px var(--logo-from);
+  display: inline-grid;
+  place-items: center;
+  width: var(--logo-size);
+  height: var(--logo-size);
+  border-radius: 24%;
+  overflow: hidden;
+  background: var(--logo-tile);
+  box-shadow: 0 0 0 1px var(--border), var(--shadow-sm);
+}
+.logo-mark__art {
+  /* Each variant is half the artwork's width and its full height. */
+  width: calc(var(--logo-size) / 2);
+  height: var(--logo-size);
+  background-image: url("../assets/brand/logo.png");
+  background-repeat: no-repeat;
+  background-size: 200% 100%;
+  background-position: var(--logo-pos);
 }
 .logo__word {
   font-weight: 800;
@@ -182,18 +199,34 @@ kbd {
   letter-spacing: -0.035em;
   color: var(--primary-text);
   line-height: 1;
-  display: inline-flex;
-  align-items: flex-end;
 }
-.logo__caret {
-  display: inline-block;
-  width: 0.42em;
-  height: 0.14em;
-  margin-left: 2px;
-  margin-bottom: 0.06em;
-  border-radius: 2px;
-  background: var(--accent);
-  animation: blink 1.1s steps(1) infinite;
+
+/* launch splash: shown by index.html until the app has mounted */
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  background: var(--bg);
+  transition: opacity 260ms var(--ease), visibility 0s linear 260ms;
+}
+#boot .logo-mark {
+  --logo-size: 132px;
+  box-shadow: 0 0 0 1px var(--border), var(--shadow-lg);
+}
+#boot .boot__word {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+  color: var(--primary-text);
+}
+#boot.is-done {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .main-col {
@@ -1711,8 +1744,7 @@ fieldset:disabled .segmented__opt {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
-  .caret,
-  .logo__caret {
+  .caret {
     animation: none !important;
     opacity: 1;
   }
@@ -1722,4 +1754,122 @@ fieldset:disabled .segmented__opt {
   .spin {
     animation: none !important;
   }
+}
+
+/* ============ external typing ============ */
+.ext-status {
+  grid-area: hint;
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.ext-status p {
+  margin: 0;
+}
+.ext-status svg {
+  vertical-align: -2px;
+  margin-right: 2px;
+}
+.ext-status--countdown,
+.ext-status--waiting {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.ext-status__countdown strong {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  color: var(--accent-text);
+}
+.ext-status--paused,
+.ext-status--resuming {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+.ext-status--failed {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.ext-status__ok {
+  color: var(--success);
+  font-weight: 600;
+}
+.ext-status__verify {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.ext-status__verify p {
+  flex: 1 1 320px;
+}
+.ext-status__warn {
+  color: var(--warning);
+}
+.paper__badge--sent {
+  color: var(--accent-text);
+}
+.paper__empty--guide {
+  place-content: center stretch;
+  justify-items: stretch;
+  text-align: left;
+}
+.ext-guide {
+  max-width: 46ch;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.ext-guide__title {
+  font-weight: 650;
+  font-size: var(--fs-base);
+}
+.ext-guide ol {
+  margin: 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+}
+.ext-guide__safety {
+  color: var(--text-muted);
+}
+.ext-guide__safety svg {
+  vertical-align: -3px;
+  color: var(--success);
+}
+.permission {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  border: 1px solid var(--border);
+}
+.permission span {
+  flex: 1 1 200px;
+}
+.permission--ok {
+  background: var(--success-soft);
+  color: var(--text);
+}
+.permission--ok svg {
+  color: var(--success);
+}
+.permission--no {
+  background: var(--warning-soft);
+}
+.permission--no svg {
+  color: var(--warning);
+}
+.output-note {
+  align-items: flex-start;
 }

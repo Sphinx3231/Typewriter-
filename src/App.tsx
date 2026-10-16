@@ -5,6 +5,7 @@ import { useTheme } from "./theme/theme";
 import { ActivityLog } from "./ui/ActivityLog";
 import { useToast } from "./ui/controls";
 import { Editor } from "./ui/Editor";
+import { ExternalGuide } from "./ui/ExternalPanel";
 import { HistoryView } from "./ui/HistoryView";
 import { Logo } from "./ui/Logo";
 import { PlaybackSurface } from "./ui/PlaybackSurface";
@@ -183,7 +184,9 @@ export default function App() {
                       <h2 className="panel__title" id="playback-title">
                         Playback
                       </h2>
-                      <p className="panel__sub">Typed out keystroke by keystroke.</p>
+                      <p className="panel__sub">
+                        {session.destination === "external" ? "What has been sent to the other app, key by key." : "Typed out keystroke by keystroke."}
+                      </p>
                     </div>
                     <StatusPill status={snapshot.status} />
                   </header>
@@ -193,6 +196,7 @@ export default function App() {
                     estimateMs={session.estimate.totalMs}
                     words={session.stats.words}
                     blank={session.blank}
+                    guide={session.destination === "external" ? <ExternalGuide session={session} /> : undefined}
                   />
                   <ActivityLog snapshot={snapshot} />
                 </section>

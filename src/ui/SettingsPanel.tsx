@@ -3,6 +3,7 @@ import { useId } from "react";
 import { LIMITS, type PlaybackSettings } from "../engine";
 import type { Session } from "../state/useSession";
 import { Button, Field, NumberInput, Segmented, Switch } from "./controls";
+import { OutputSettings } from "./ExternalPanel";
 import { clockDuration, longDuration, nf } from "./format";
 
 const PRESETS: { id: string; label: string; title: string; patch: Partial<PlaybackSettings> }[] = [
@@ -52,6 +53,8 @@ export function SettingsPanel({ session }: { session: Session }) {
           <p className="panel__sub">{running ? "Changes apply when you restart." : "Saved automatically on this device."}</p>
         </div>
       </header>
+
+      <OutputSettings session={session} />
 
       {/* ---- timing ---- */}
       <div className="settings__group">

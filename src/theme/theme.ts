@@ -18,6 +18,9 @@ function readPreference(): ThemePreference {
 
 function apply(theme: ThemeName) {
   document.documentElement.dataset.theme = theme;
+  // Desktop: match the native title bar to the app theme.
+  if ("__TAURI_INTERNALS__" in window)
+    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme)).catch(() => {});
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme === "dark" ? "#0a0a0d" : "#f6f6fb");
 }
