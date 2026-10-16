@@ -107,7 +107,14 @@ export function verifyField(before: FocusProbe, after: FocusProbe, source: strin
       ? { status: "verified", detail: "Read back from the field: it contains your text exactly." }
       : { status: "mismatch", detail: "The field's text isn't what was typed. The page may have changed it (autocomplete, formatting, a length limit)." };
   }
-  // Rich editors: the typed text must now appear, and must not have been there before.
+  // Rich editors: if the page's text didn't change at all, the editor keeps its text somewhere
+  // Typewriter can't see (like Google Docs). That is not evidence either way.
+  if (source && norm(after.text) === norm(before.text))
+    return {
+      status: "unreadable",
+      detail: "This editor doesn't keep its text where Typewriter can read it. Select the typed text, copy it, and use Check copied text.",
+    };
+  // Otherwise the typed text must now appear, and must not have been there before.
   const ok = norm(after.text).includes(norm(source)) && !norm(before.text).includes(norm(source));
   return ok
     ? { status: "verified", detail: "Read back from the editor: your text appears exactly (non-breaking spaces count as spaces)." }
@@ -200,6 +207,7 @@ export class ChromeTypingSession {
     let countdownFrom: number | null = null;
     let tabId: number | null = null;
     let lastNote = "";
+    let fieldSince: number | null = null;
     for (;;) {
       if (this.take() === "stop") return this.finish("stopped", "user", null);
       if (this.detached) return this.finish("stopped", "detached", "Chrome stopped the typing session (the debugging bar was closed or the tab went away).");
@@ -229,14 +237,22 @@ export class ChromeTypingSession {
         continue;
       }
       const probe = await this.browser.probe();
+      if (probe?.sensitive) return this.finish("failed", "sensitive", `${probe.sensitive} Typewriter never types into password or hidden fields.`);
       if (!probe || !probe.editable) {
         if (lastNote !== "no-field") this.update("waiting", 0, "no-text-field", "Click into a document or text field on the page. Typing starts a moment after.");
         lastNote = "no-field";
-        countdownFrom = this.clock.now() - this.opts.countdownMs + 800; // short settle once a field has focus
+        fieldSince = null;
         await this.clock.sleep(150);
         continue;
       }
-      if (probe.sensitive) return this.finish("failed", "sensitive", `${probe.sensitive} Typewriter never types into password or hidden fields.`);
+      // After waiting for a field, give the click a moment to settle before typing.
+      if (lastNote === "no-field") {
+        fieldSince ??= this.clock.now();
+        if (this.clock.now() - fieldSince < 800) {
+          await this.clock.sleep(100);
+          continue;
+        }
+      }
       if (probe.kind === "input" && /[\r\n]/.test(this.opts.source))
         return this.finish("failed", "single-line", "That's a single-line field, but your text has line breaks. Pressing Enter there could submit a form, so nothing was typed.");
       this.target = { tab, probe };

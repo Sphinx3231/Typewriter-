@@ -11,3 +11,6 @@ playwright-report/
 tsconfig.tsbuildinfo
 target/
 src-tauri/gen/
+dist-extension/
+dist-extension-test/
+release/

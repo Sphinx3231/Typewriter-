@@ -28,6 +28,14 @@ export async function hasDebuggerPermission(): Promise<boolean> {
   }
 }
 
+function requestDebugger(): Promise<boolean> {
+  try {
+    return chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 export function extensionBridge(): Bridge {
   const listeners = new Set<(u: NativeUpdate) => void>();
   let session: ChromeTypingSession | null = null;
@@ -41,8 +49,8 @@ export function extensionBridge(): Bridge {
 
   return {
     async support(prompt: boolean): Promise<Support> {
-      let granted = await hasDebuggerPermission();
-      if (!granted && prompt) granted = await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
+      // request() resolves at once if already granted; it must be the first call so it runs in the click.
+      const granted = prompt ? await requestDebugger() : await hasDebuggerPermission();
       return granted
         ? { available: true, state: "ok", platform: "chrome", message: "Ready to type into web pages in this window." }
         : {
@@ -53,8 +61,8 @@ export function extensionBridge(): Bridge {
           };
     },
     async start(events: TypingEvent[], countdownMs: number, _minimize: boolean, source = "") {
-      // Must run in the click that started it: Chrome only shows permission prompts for user gestures.
-      const granted = (await hasDebuggerPermission()) || (await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false));
+      // Must be the first call, inside the click that started it: Chrome only shows permission prompts for user gestures.
+      const granted = await requestDebugger();
       if (!granted) {
         const s: Support = {
           available: false,

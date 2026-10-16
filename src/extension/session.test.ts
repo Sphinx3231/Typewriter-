@@ -168,6 +168,16 @@ describe("Chrome typing session", () => {
     expect(s.browser.attached).toBeNull();
   });
 
+  it("refuses a password field even when it isn't reported as editable", async () => {
+    const s = setup();
+    s.browser.kind = "input";
+    s.browser.editable = false;
+    s.browser.sensitive = "This is a password field.";
+    expect(await s.session.run()).toBe("failed");
+    expect(s.last().reason).toBe("sensitive");
+    expect(s.browser.sent).toHaveLength(0);
+  });
+
   it("refuses multi-line text in a single-line field (Enter could submit a form)", async () => {
     const s = setup();
     s.browser.kind = "input";
@@ -386,7 +396,9 @@ describe("field verification", () => {
   it("for rich editors, requires the text to newly appear", () => {
     const ce = { kind: "contenteditable" as const, selStart: null, selEnd: null };
     expect(verifyField(p({ ...ce, text: "" }), p({ ...ce, text: "Hi there\n" }), "Hi there")?.status).toBe("verified");
-    expect(verifyField(p({ ...ce, text: "Hi there" }), p({ ...ce, text: "Hi there" }), "Hi there")?.status).toBe("mismatch");
+    expect(verifyField(p({ ...ce, text: "Hi there" }), p({ ...ce, text: "Hi there. Hi there" }), "Hi there")?.status).toBe("mismatch");
+    // DOM text unchanged: the editor keeps its text elsewhere, so it's unknown, not a mismatch.
+    expect(verifyField(p({ ...ce, text: "" }), p({ ...ce, text: "" }), "Hi there")?.status).toBe("unreadable");
     expect(verifyField(p({ ...ce, text: "" }), p({ ...ce, text: "“Hi”" }), '"Hi"')?.status).toBe("mismatch");
   });
   it("is unreadable when either side can't be read", () => {
