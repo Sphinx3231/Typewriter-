@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Target Doc</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #fff; }
+      #doc { box-sizing: border-box; width: 100vw; height: 70vh; padding: 16px; border: 0; outline: 2px solid #ccc; font: 16px/1.5 monospace; white-space: pre-wrap; }
+      #pw { margin: 16px; }
+    </style>
+  </head>
+  <body>
+    <textarea id="doc" spellcheck="false"></textarea>
+    <input id="pw" type="password" placeholder="password" />
+    <script>
+      // Like Google Docs, Tab inserts a tab instead of moving focus.
+      document.getElementById("doc").addEventListener("keydown", function (e) {
+        if (e.key !== "Tab") return;
+        e.preventDefault();
+        document.execCommand("insertText", false, "\t");
+      });
+    </script>
+  </body>
+</html>

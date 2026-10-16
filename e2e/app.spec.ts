@@ -396,3 +396,36 @@ test("typing sounds play only when enabled and stop instantly when switched off"
   expect(await clicks()).toBe(atOff);
   await expect(status(page)).toHaveText("Complete", { timeout: 10_000 });
 });
+
+test("logo shows the light half in light theme and the dark half in dark theme, instantly and after reload", async ({ page }) => {
+  const logo = () =>
+    page.locator(".sidebar .logo-mark__art").evaluate((el) => ({ pos: getComputedStyle(el).backgroundPosition, img: getComputedStyle(el).backgroundImage, theme: document.documentElement.dataset.theme }));
+  const expectMatch = (l: { pos: string; theme?: string }) => expect(l.pos).toBe(l.theme === "dark" ? "100% 0%" : "0% 0%");
+  await expect(page.locator("#boot")).toHaveCount(0); // launch splash clears after mount
+  const first = await logo();
+  expect(first.img).toMatch(/logo/);
+  expectMatch(first);
+  // The image must actually load.
+  const loaded = await page.evaluate(async (url) => {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return [img.naturalWidth, img.naturalHeight];
+  }, first.img.replace(/^url\("?|"?\)$/g, ""));
+  expect(loaded).toEqual([1254, 1254]);
+  for (let i = 0; i < 6; i++) {
+    await page.getByTestId("theme-switch").click();
+    expectMatch(await logo()); // same frame as the theme change, no reload
+  }
+  await page.getByTestId("theme-switch").click();
+  const chosen = await logo();
+  await page.reload();
+  const after = await logo();
+  expect(after.theme).toBe(chosen.theme);
+  expectMatch(after);
+});
+
+test("browser preview explains that typing into other apps needs the desktop app", async ({ page }) => {
+  await expect(page.getByText("To type into Google Docs or any other app, use the Typewriter desktop app.")).toBeVisible();
+  await expect(page.getByRole("radiogroup", { name: "Where to type" })).toHaveCount(0);
+});

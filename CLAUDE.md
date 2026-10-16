@@ -30,8 +30,9 @@ The app runs entirely on the user's device:
 - Fonts, icons, and sounds ship inside the bundle. Fonts are self-hosted from npm, not
   fetched from a CDN at runtime. Sounds are synthesized with Web Audio.
 - Preferences live in local browser storage only.
-- The reference sheet shows a "Connect to Google Docs" destination. That needs an external
-  API, so it is out of scope. Typing happens in Typewriter's own playback surface.
+- The reference sheet shows a "Connect to Google Docs" destination. Typewriter never uses a
+  Google (or any other) API for this. The desktop app types into Google Docs, or any other app,
+  by sending real key presses through the operating system, locally (see `docs/DESKTOP.md`).
 
 ### 3. The user's text is untouchable
 The final output must equal the source text exactly, character for character (see SPEC §2).
@@ -62,10 +63,17 @@ rewrite, or "fix" what the user wrote.
 ## Commands
 
 ```bash
-npm install        # install dependencies
-npm run dev        # start the dev server
-npm run build      # typecheck + production build
-npm test           # unit tests (Vitest)
-npm run test:e2e   # browser tests (Playwright, uses the preinstalled Chromium)
-npm run lint       # typecheck only
+npm install          # install dependencies
+npm run dev          # start the web dev server
+npm run build        # typecheck + production web build
+npm test             # unit tests (Vitest)
+npm run test:e2e     # browser tests (Playwright, uses the preinstalled Chromium)
+npm run test:native  # native typing engine tests (Rust)
+npm run test:desktop # desktop end-to-end: packaged app types into a real Chromium window
+                     # (needs Xvfb, openbox, xdotool, tauri-driver; build first)
+npm run desktop:dev  # run the desktop app in development
+npm run desktop:build # build desktop installers (src-tauri/target/release/bundle/)
+npm run lint         # typecheck only
 ```
+
+Desktop details, permissions and limitations: `docs/DESKTOP.md`.

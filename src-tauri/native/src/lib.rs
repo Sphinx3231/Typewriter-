@@ -6,6 +6,8 @@
 pub mod keys;
 pub mod platform;
 pub mod session;
+#[cfg(target_os = "linux")]
+pub mod xtyper;
 
 pub use keys::{Event, KeyAction, Translator, VirtualField};
 pub use platform::{check_support, Desktop, RealDesktop, Support, WindowInfo};

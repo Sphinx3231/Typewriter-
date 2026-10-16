@@ -1,5 +1,6 @@
 import { History, PenLine, Settings } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { markReady } from "./ready";
 import { useSession } from "./state/useSession";
 import { useTheme } from "./theme/theme";
 import { ActivityLog } from "./ui/ActivityLog";
@@ -38,6 +39,8 @@ export default function App() {
   const toast = useToast();
   const [view, setView] = useState<View>(viewFromHash);
   const { snapshot } = session;
+
+  useEffect(() => markReady(), []);
 
   useEffect(() => {
     const onHash = () => setView(viewFromHash());

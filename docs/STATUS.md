@@ -1,91 +1,81 @@
 # Status
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-10-16 (phase 2: logo, desktop app, typing into other apps)_
 
-## Summary
-
-All required features in `docs/SPEC.md` are built and verified in a real browser, apart from the limitations listed below.
-
-- Branch: `ccr-e747ce8b-l498oo`
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
-- Live preview: https://claude.ai/artifact/9pi8hGpiZY1TfVYpYNkZ65
+- Browser preview: https://claude.ai/artifact/9pi8hGpiZY1TfVYpYNkZ65
+- Desktop guide (install, permissions, Google Docs workflow): [`DESKTOP.md`](DESKTOP.md)
 
-## Tests (all passing at the last run)
+## What's built
 
-### Unit and fuzz tests (`npm test`): 46
+**Browser and desktop:** everything in `docs/SPEC.md`. That's realistic typing playback with exact text integrity, both themes, history, sounds, accessibility and responsive layouts.
 
-- **Text integrity.** Exact output for 11 tricky texts × 5 realism modes × 300 seeds, covering:
-  - unicode, emoji (ZWJ, flags, skin tones, keycaps) and combining marks
-  - CRLF, tabs, and leading/trailing whitespace
-  - the user's own misspellings
-  - 100k characters
-- **Realism.**
-  - deterministic seeds
-  - clean mode gives even intervals
-  - variation levels change the spread
-  - pauses only when enabled
-  - mistake levels
-  - autocorrect vs. backspace vs. caret-move fixes
-  - correction delay range
-- **Timing.**
-  - duration mode lands exactly on the requested length
-  - speed mode adds time for pauses and corrections
-  - duration and WPM convert both ways
-  - too-short and superhuman-speed detection
-- **Controller.**
-  - completion and verification
-  - pause/resume, including 200 rapid cycles
-  - restart
-  - stop vs. pause
-  - invalid transitions rejected
-  - late timers cause no drift
-  - a mismatch is reported as an error, never as success
-- **Fuzz.**
-  - 1,500 random texts × random settings, with invariants checked after every keystroke
-  - surrounding text is never disturbed
-  - typos are always visibly marked
-  - 300 random command sequences: no timer leaks, exact output afterwards
+**Logo.** The supplied artwork is used unmodified. CSS shows its light half in the light theme and its dark half in the dark theme. It appears in the sidebar, the phone header, the launch splash, the desktop status window and the About section. App icons and the favicon are the dark half, padded to a square with its own background, never cropped.
 
-### Browser tests (`npm run test:e2e`, Chromium): 25
+**Desktop app** (Tauri 2). Linux `.deb`, `.rpm` and `.AppImage` were built here. Windows and macOS installers are built by the **Desktop builds** GitHub Actions workflow.
 
-- exact output after typos and corrections
-- typos visible, and autocorrect and backspace both observed
-- pause/resume exactness
-- stop vs. restart
-- finishes within ±1 s of the requested duration
-- theme switch mid-playback doesn't interrupt typing
-- palette tokens per theme
-- theme persists across reloads
-- system theme on first launch
-- settings persist
-- empty and whitespace-only input blocked with a message
-- too-short duration conflict and adjustment
-- copy returns the exact text
-- keyboard shortcuts
-- history never stores text
-- switching views doesn't interrupt playback
-- 105k-character text stays responsive
-- no horizontal overflow at 360 / 390 / 768 / 1024 / 1280 / 1920 px in both themes and all views
-- keyboard-only use with visible focus
-- reduced motion
-- sounds only when enabled and stop instantly
-- chaos test: 120 random rapid clicks, then an exact finish
+**Typing into other apps.**
+- **Safety:**
+  - a countdown before any key;
+  - an emergency stop (Ctrl+Shift+Space or the mouse corner);
+  - pause when focus leaves the target;
+  - never typing into Typewriter itself;
+  - refusing password and login fields;
+  - waiting while modifier keys are held.
+- **Honest results:** finished sessions say "sent" until a copy-back check verifies the document.
 
-### Visual checks
+## Tests (all run, all passing)
 
-- Screenshots inspected in both themes at phone, tablet and desktop sizes, in these states: empty, ready, typing, typo, paused, completed, history and settings.
-- Issues found and fixed:
-  - see-through phone header
-  - badge covering text
-  - cramped presets and filters
-  - misleading speed cap
+| Suite | Command | Count | What it covers |
+|---|---|---|---|
+| Unit and fuzz (Vitest) | `npm test` | **54** | Engine integrity over thousands of seeds, timing, the state machine; the external output adapter (arming, mirroring, pause/resume, stop, no restart, permission denied, stale updates); copy-back verification; native fixture export |
+| Browser (Playwright, Chromium) | `npm run test:e2e` | **27** | Every in-app control, themes and persistence, the logo half switching with the theme (and after reload), the image loading at full size, the splash clearing, the browser-only output note, accessibility, no overflow at 6 widths, chaos clicking |
+| Native (Rust) | `npm run test:native` | **18** | Event-to-key translation; full sessions on a simulated desktop (countdown, focus guard, login and password refusal, modifier wait, stop, failsafe, drift); replay of 96 engine timelines with typos; the no-display refusal; keysyms |
+| Desktop end-to-end | `npm run test:desktop` | **13** | Real packaged app, real X11 display, real key events into a real Chromium window (details below) |
+| Typecheck and build | `npm run lint`, `npm run build` | — | clean |
+
+**Total: 112 automated tests passing.** The desktop suite passed against both the freshly built binary and the **installed `.deb`** (`/usr/bin/typewriter`). The AppImage launched and passed the startup check.
+
+### Desktop end-to-end, in detail
+
+Xvfb + openbox run the session. WebDriver (tauri-driver) operates Typewriter's UI. `xdotool` does the user's clicks, window switches and key presses. The text that arrives in Chromium is read back over CDP. Typewriter's input path is not mocked.
+
+1. The app starts without a dev server, shows its window, clears the splash, and shows the right logo half.
+2. The theme toggle switches the UI and the logo together six times, and persists across an app restart.
+3. Pixels on screen change with the theme. This catches a WebKitGTK repaint bug, found and fixed: the window stopped repainting with the DMA-BUF renderer.
+4. Nothing is typed after arming while Typewriter still has focus.
+5. **Tricky text arrives exactly in Chromium:** accents, CJK, emoji including family and flag sequences, tabs, blank lines, trailing spaces, the user's own misspellings, and medium typos with mixed corrections. Nothing is typed during the countdown, the text arrives progressively, and it finishes within the planned time. Typewriter reports "not checked yet".
+6. 1,500 characters in 12 s arrive exactly and on time.
+7. The copy-back check marks the document Verified.
+8. Caps Lock left on doesn't change the case of what's typed.
+9. Switching to another app pauses typing, and the other app gets no keys. Resume waits for the document window, then finishes exactly.
+10. Ctrl+Shift+Space stops typing immediately.
+11. Moving the mouse to the top-left corner stops typing.
+12. A window titled "Sign in" is refused before any key is sent.
+13. The in-app preview still works in the desktop app.
+
+### Manual checks
+
+- Screenshots of the packaged app in both themes, the arming state, typing with the status window, and the finished/verified state.
+- The real theme switch clicked with the mouse in a hand-launched app.
+
+## Not verified
+
+- **Typing into an actual Google Docs document.** This environment has no Google account, so the Google Docs acceptance test could not be run. The same mechanism is verified end to end into a real Chromium text area, as above. To check it yourself, follow the steps in `DESKTOP.md` and use **Check copied text**. Google Docs' own autocorrect options can change text (see `DESKTOP.md`).
+- **Windows and macOS.** Not launched or used here.
+  - The Windows-specific code (UI Automation password detection, modifier state) type-checks for the Windows target.
+  - The macOS-specific code (secure input, modifier state) can only be compiled on a Mac. The **Desktop builds** workflow compiles and packages both.
+- **Permission prompts** (macOS Accessibility). The denied path is covered by unit tests (structured error, explanation shown, nothing typed), but not by a real macOS run.
+- **Sound in external mode.** Clicks play from the progress mirror; this hasn't been listened to.
 
 ## Known limitations
 
-- **No Google Docs destination.** The reference sheet shows "Connect to Google Docs". That needs an external API, which the project rules forbid. Text is typed in Typewriter's own playback area and copied out from there.
-- **Web app, not a native desktop app.** It runs in any modern browser and could be wrapped (e.g. Tauri) later. Packaging is not done.
-- **No unfinished-session recovery.** Settings and theme are restored. The text is restored only if "Remember my text on this device" is on, which is off by default. An unfinished playback is not resumed after a reload.
-- **QWERTY neighbours only.** Adjacent-key typos use a QWERTY layout. Letters outside a–z (e.g. Greek, Cyrillic) still get doubled, dropped, swapped or case typos, but not neighbour-key ones.
-- **Background tabs.** Browsers throttle timers in background tabs. Playback stays on schedule: missed keystrokes are applied in a batch when the tab wakes, silently.
-- **Sound not judged by ear.** Tests confirm sounds play only when enabled; nobody has listened to them in this environment.
-- **Preview theme may follow the claude.ai viewer.** The preview runs inside the claude.ai viewer, which sets its own light/dark attribute on load, so the preview may start in the viewer's theme.
+- **Restart is disabled in "Into another app" mode**, because the text already typed would be duplicated.
+- **Linux:**
+  - It needs an X11 session; on Wayland, Typewriter explains this and types nothing.
+  - There's no password-field detection, only the window-title check.
+- **Resume relies on the caret.** It continues wherever the document's caret is. Switching windows keeps the caret; clicking elsewhere in the document moves it.
+- **Installers are unsigned** ($0 budget), so expect a SmartScreen or Gatekeeper warning.
+- **Phase 1 limitations still apply:**
+  - no unfinished-session recovery after a reload;
+  - adjacent-key typos assume a QWERTY layout.

@@ -101,7 +101,9 @@ pub fn check_support(prompt: bool) -> Support {
 pub struct RealDesktop {
     enigo: Enigo,
     #[cfg(target_os = "linux")]
-    x11: Option<(x11rb::rust_connection::RustConnection, u32)>,
+    x11: Option<linux::X11>,
+    #[cfg(target_os = "linux")]
+    typer: Option<crate::xtyper::XTyper>,
 }
 
 impl RealDesktop {
@@ -119,17 +121,21 @@ impl RealDesktop {
         Ok(Self {
             enigo,
             #[cfg(target_os = "linux")]
-            x11: x11rb::connect(None).ok().map(|(c, screen)| {
-                use x11rb::connection::Connection;
-                let root = c.setup().roots[screen].root;
-                (c, root)
-            }),
+            x11: linux::X11::connect(),
+            #[cfg(target_os = "linux")]
+            typer: crate::xtyper::XTyper::connect().ok(),
         })
     }
 }
 
 impl Desktop for RealDesktop {
     fn focused_window(&mut self) -> Option<WindowInfo> {
+        // On X11, ask over the session's own connection: active-win-pos-rs opens a
+        // new connection per call, which is far too slow to do before every key.
+        #[cfg(target_os = "linux")]
+        if let Some(x) = &self.x11 {
+            return x.active_window();
+        }
         let w = active_win_pos_rs::get_active_window().ok()?;
         Some(WindowInfo { window_id: w.window_id, process_id: w.process_id, app_name: w.app_name, title: w.title })
     }
@@ -141,14 +147,7 @@ impl Desktop for RealDesktop {
     fn modifiers_held(&mut self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
-            if let Some((c, root)) = &self.x11 {
-                if let Ok(Ok(reply)) = c.query_pointer(*root).map(|r| r.reply()) {
-                    let m = reply.mask;
-                    return m.contains(KeyButMask::SHIFT) || m.contains(KeyButMask::CONTROL) || m.contains(KeyButMask::MOD1) || m.contains(KeyButMask::MOD4);
-                }
-            }
-            false
+            self.x11.as_ref().and_then(|x| x.pointer()).map(|p| p.modifiers).unwrap_or(false)
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -157,10 +156,18 @@ impl Desktop for RealDesktop {
     }
 
     fn failsafe_triggered(&mut self) -> bool {
+        #[cfg(target_os = "linux")]
+        if let Some(p) = self.x11.as_ref().and_then(|x| x.pointer()) {
+            return p.x <= 1 && p.y <= 1;
+        }
         matches!(self.enigo.location(), Ok((x, y)) if x <= 1 && y <= 1)
     }
 
     fn send(&mut self, action: &KeyAction) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        if let Some(t) = self.typer.as_mut() {
+            return t.send(action);
+        }
         let r = match action {
             KeyAction::Text(t) => self.enigo.text(t),
             KeyAction::Enter => self.enigo.key(Key::Return, Direction::Click),
@@ -224,6 +231,89 @@ mod os {
         const COMMAND: u64 = 0x0010_0000;
         let flags = unsafe { CGEventSourceFlagsState(0) };
         flags & (SHIFT | CONTROL | ALT | COMMAND) != 0
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::WindowInfo;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt, KeyButMask, Window};
+    use x11rb::rust_connection::RustConnection;
+
+    #[derive(Clone, Copy)]
+    pub struct Pointer {
+        pub x: i16,
+        pub y: i16,
+        pub modifiers: bool,
+    }
+
+    /// One persistent X11 connection for focus, pointer and modifier queries.
+    pub struct X11 {
+        conn: RustConnection,
+        root: Window,
+        active: Atom,
+        pid: Atom,
+        name: Atom,
+        utf8: Atom,
+        // Pointer and modifiers come from one query; reuse it briefly.
+        pointer: Cell<Option<(Instant, Pointer)>>,
+    }
+
+    impl X11 {
+        pub fn connect() -> Option<Self> {
+            let (conn, screen) = x11rb::connect(None).ok()?;
+            let root = conn.setup().roots[screen].root;
+            let atom = |n: &str| conn.intern_atom(false, n.as_bytes()).ok()?.reply().ok().map(|r| r.atom);
+            Some(Self {
+                active: atom("_NET_ACTIVE_WINDOW")?,
+                pid: atom("_NET_WM_PID")?,
+                name: atom("_NET_WM_NAME")?,
+                utf8: atom("UTF8_STRING")?,
+                conn,
+                root,
+                pointer: Cell::new(None),
+            })
+        }
+
+        fn window_prop(&self, w: Window, prop: Atom, ty: Atom, len: u32) -> Option<x11rb::protocol::xproto::GetPropertyReply> {
+            self.conn.get_property(false, w, prop, ty, 0, len).ok()?.reply().ok()
+        }
+
+        pub fn active_window(&self) -> Option<WindowInfo> {
+            let r = self.window_prop(self.root, self.active, AtomEnum::WINDOW.into(), 1)?;
+            let w = r.value32()?.next()?;
+            if w == 0 {
+                return None;
+            }
+            let pid = self.window_prop(w, self.pid, AtomEnum::CARDINAL.into(), 1).and_then(|r| r.value32().and_then(|mut v| v.next())).unwrap_or(0);
+            let title = self
+                .window_prop(w, self.name, self.utf8, 1024)
+                .map(|r| String::from_utf8_lossy(&r.value).into_owned())
+                .filter(|t| !t.is_empty())
+                .or_else(|| self.window_prop(w, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into(), 1024).map(|r| String::from_utf8_lossy(&r.value).into_owned()))
+                .unwrap_or_default();
+            Some(WindowInfo { window_id: w.to_string(), process_id: pid as u64, app_name: String::new(), title })
+        }
+
+        pub fn pointer(&self) -> Option<Pointer> {
+            if let Some((t, p)) = self.pointer.get() {
+                if t.elapsed() < Duration::from_millis(5) {
+                    return Some(p);
+                }
+            }
+            let r = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
+            let m = r.mask;
+            let p = Pointer {
+                x: r.root_x,
+                y: r.root_y,
+                modifiers: m.contains(KeyButMask::SHIFT) || m.contains(KeyButMask::CONTROL) || m.contains(KeyButMask::MOD1) || m.contains(KeyButMask::MOD4),
+            };
+            self.pointer.set(Some((Instant::now(), p)));
+            Some(p)
+        }
     }
 }
 
