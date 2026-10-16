@@ -16,7 +16,8 @@ import {
   type PlaybackSettings,
   type PlaybackStatus,
 } from "../engine";
-import { isDesktop, tauriBridge, type Support } from "../desktop/bridge";
+import { tauriBridge, type Bridge, type Support } from "../desktop/bridge";
+import { currentHost } from "../platform";
 import { ExternalController } from "../desktop/external";
 import type { VerifyResult } from "../desktop/verify";
 import { readJSON, readString, removeKey, writeJSON, writeString } from "./storage";
@@ -80,28 +81,30 @@ export function useSession() {
   if (!previewRef.current) previewRef.current = new PlaybackController();
   const preview = previewRef.current;
 
-  // Desktop only: the adapter that types into other apps.
-  const desktop = isDesktop();
+  // Desktop app and Chrome extension: the adapter that types outside the preview.
+  const host = currentHost();
+  const desktop = host === "desktop";
   const [external, setExternal] = useState<ExternalController | null>(null);
   const [support, setSupport] = useState<Support>(() =>
-    desktop
-      ? { available: false, state: "unsupported", platform: "", message: "Checking keyboard access…" }
-      : { available: false, state: "browser", platform: "web", message: "Typing into other apps needs the Typewriter desktop app." },
+    host !== "web"
+      ? { available: false, state: "unsupported", platform: "", message: "Checking…" }
+      : { available: false, state: "browser", platform: "web", message: "Typing into other apps needs the Typewriter desktop app or Chrome extension." },
   );
+  const bridgeRef = useRef<Bridge | null>(null);
   useEffect(() => {
-    if (!desktop) return;
+    if (host === "web") return;
     let alive = true;
-    void tauriBridge().then(async (bridge) => {
+    const make: Promise<Bridge> = host === "desktop" ? tauriBridge() : import("../extension/bridge").then((m) => m.extensionBridge());
+    void make.then(async (bridge) => {
       if (!alive) return;
+      bridgeRef.current = bridge;
       setExternal(new ExternalController(bridge));
       setSupport(await bridge.support(false));
-      bridgeRef.current = bridge;
     });
     return () => {
       alive = false;
     };
-  }, [desktop]);
-  const bridgeRef = useRef<Awaited<ReturnType<typeof tauriBridge>> | null>(null);
+  }, [host]);
 
   const useExternal = prefs.destination === "external" && !!external;
   const controller = useExternal ? external! : preview;
@@ -316,6 +319,7 @@ export function useSession() {
     controller,
     snapshot,
     desktop,
+    host,
     externalReady: !!external,
     support,
     refreshSupport,

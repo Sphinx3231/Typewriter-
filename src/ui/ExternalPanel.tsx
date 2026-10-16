@@ -1,10 +1,22 @@
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Keyboard, MonitorSmartphone, MousePointerClick, ShieldCheck, Timer } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ExternalInfo } from "../engine";
+import type { Host } from "../platform";
 import type { Session } from "../state/useSession";
 import { Button, Field, NumberInput, Segmented, Switch, useToast } from "./controls";
 
-export const STOP_SHORTCUT = "Ctrl + Shift + Space";
+export const DESKTOP_STOP_SHORTCUT = "Ctrl + Shift + Space";
+const EXTENSION_DEFAULT_STOP = "Alt+Shift+Period";
+
+/** The real emergency-stop shortcut for this host (in Chrome, users can change it). */
+export function useStopShortcut(host: Host): string {
+  const [key, setKey] = useState(host === "desktop" ? DESKTOP_STOP_SHORTCUT : EXTENSION_DEFAULT_STOP);
+  useEffect(() => {
+    if (host !== "extension") return;
+    void import("../extension/bridge").then((m) => m.stopShortcut()).then((k) => setKey(k || "not set (chrome://extensions/shortcuts)"));
+  }, [host]);
+  return key;
+}
 
 export function externalLabel(ext: ExternalInfo): string | undefined {
   switch (ext.phase) {
@@ -27,10 +39,12 @@ export function externalLabel(ext: ExternalInfo): string | undefined {
   }
 }
 
-/** Live guidance and verification while typing into another app. */
+/** Live guidance and verification while typing outside the preview. */
 export function ExternalStatus({ session }: { session: Session }) {
   const ext = session.snapshot.external!;
   const toast = useToast();
+  const stop = useStopShortcut(session.host);
+  const inChrome = session.host === "extension";
   const [checking, setChecking] = useState(false);
   const verify = async () => {
     setChecking(true);
@@ -43,32 +57,43 @@ export function ExternalStatus({ session }: { session: Session }) {
   if (ext.phase === "waiting")
     body = (
       <p>
-        <MousePointerClick size={15} aria-hidden="true" /> Switch to your document and click exactly where the text should start. The countdown begins when
-        Typewriter loses focus. Nothing is typed before it ends.
+        <MousePointerClick size={15} aria-hidden="true" />{" "}
+        {inChrome
+          ? ext.message ?? "Switch to the tab you want to type into."
+          : "Switch to your document and click exactly where the text should start. The countdown begins when Typewriter loses focus."}{" "}
+        Nothing is typed yet.
       </p>
     );
   else if (ext.phase === "countdown")
     body = (
       <p className="ext-status__countdown" data-testid="ext-countdown">
-        <Timer size={15} aria-hidden="true" /> Typing starts in <strong>{Math.max(1, Math.ceil(ext.countdownMs / 1000))}</strong>. Keep the cursor where you
-        want the text.
+        <Timer size={15} aria-hidden="true" /> Typing starts in <strong>{Math.max(1, Math.ceil(ext.countdownMs / 1000))}</strong>.{" "}
+        {inChrome ? "Click in the page exactly where the text should start." : "Keep the cursor where you want the text."}
       </p>
     );
   else if (ext.phase === "typing")
     body = (
       <p>
         <Keyboard size={15} aria-hidden="true" /> Typing into <strong>{ext.target?.title || "the selected window"}</strong>.{" "}
-        {ext.message ? `${ext.message} ` : ""}Emergency stop: <kbd>{STOP_SHORTCUT}</kbd> or move the mouse to the top-left corner.
+        {ext.message && !inChrome ? `${ext.message} ` : ""}Emergency stop: <kbd>{stop}</kbd>{" "}
+        {inChrome ? "or the Stop button. Closing this panel or Chrome's debugging bar also stops it." : "or move the mouse to the top-left corner."}
       </p>
     );
   else if (ext.phase === "paused" || ext.phase === "resuming")
     body = (
       <p>
-        <AlertTriangle size={15} aria-hidden="true" /> {ext.message ?? "Paused."} {ext.phase === "paused" ? "Press Resume, then click back into your document." : ""}
+        <AlertTriangle size={15} aria-hidden="true" /> {ext.message ?? "Paused."}{" "}
+        {ext.phase === "paused" ? (inChrome ? "Press Resume, then go back to the tab." : "Press Resume, then click back into your document.") : ""}
       </p>
     );
   else if (ext.phase === "stopped")
-    body = <p>{ext.reason === "failsafe" ? "Stopped because the mouse moved to the top-left corner." : "Stopped. Keys already typed stay in your document."}</p>;
+    body = (
+      <p>
+        {ext.reason === "failsafe"
+          ? "Stopped because the mouse moved to the top-left corner."
+          : ext.message ?? "Stopped. Keys already typed stay in your document."}
+      </p>
+    );
   else if (ext.phase === "failed")
     body = (
       <p role="alert">
@@ -86,13 +111,12 @@ export function ExternalStatus({ session }: { session: Session }) {
           <p data-testid="ext-unverified">
             {ext.verification === "mismatch" ? (
               <>
-                <AlertTriangle size={15} aria-hidden="true" /> <strong>The document text doesn't match.</strong> {ext.verificationDetail} Your document app may have
-                changed it (autocorrect, smart quotes, automatic lists).
+                <AlertTriangle size={15} aria-hidden="true" /> <strong>The document text doesn't match.</strong> {ext.verificationDetail}
               </>
             ) : (
               <>
-                Every key was sent, but Typewriter can't see inside other apps, so <strong>the document hasn't been checked</strong>. To check: select the typed text
-                in your document, copy it, then press Check.
+                Every key was sent, but <strong>the document hasn't been checked</strong>. {ext.verificationDetail ?? "Typewriter can't see inside other apps."} To
+                check: select the typed text in your document, copy it, then press Check.
               </>
             )}
           </p>
@@ -105,15 +129,39 @@ export function ExternalStatus({ session }: { session: Session }) {
     <div className={`ext-status ext-status--${ext.phase}`} role="status" aria-live="polite" data-testid="ext-status">
       {body}
       {!ext.shortcutRegistered && (ext.phase === "typing" || ext.phase === "countdown") ? (
-        <p className="ext-status__warn">The emergency shortcut couldn't be registered on this system. Use the mouse corner or the Stop button.</p>
+        <p className="ext-status__warn">
+          {inChrome
+            ? "No keyboard shortcut is set for Stop typing (chrome://extensions/shortcuts). Use the Stop button."
+            : "The emergency shortcut couldn't be registered on this system. Use the mouse corner or the Stop button."}
+        </p>
       ) : null}
     </div>
   );
 }
 
-/** Steps shown in the playback panel before typing into another app. */
+/** Steps shown in the playback panel before typing outside the preview. */
 export function ExternalGuide({ session }: { session: Session }) {
   const sec = session.prefs.countdownSec;
+  const stop = useStopShortcut(session.host);
+  if (session.host === "extension")
+    return (
+      <div className="ext-guide" data-testid="ext-guide">
+        <p className="ext-guide__title">Type into a web page</p>
+        <ol>
+          <li>Paste your text and choose the duration and realism.</li>
+          <li>
+            Press <strong>Type into page</strong>. The first time, Chrome asks to let Typewriter control typing in a tab.
+          </li>
+          <li>In the page (for example Google Docs), click exactly where the text should go.</li>
+          <li>After a {sec}-second countdown, the text is typed there as real key presses.</li>
+        </ol>
+        <p className="ext-guide__safety">
+          <ShieldCheck size={15} aria-hidden="true" /> Stop any time with <kbd>{stop}</kbd> or the Stop button. It pauses if you switch tabs or click into another
+          field, stops if the page reloads, and never types into password or hidden fields. Chrome shows a "started debugging this browser" bar while it types;
+          closing that bar stops typing too.
+        </p>
+      </div>
+    );
   return (
     <div className="ext-guide" data-testid="ext-guide">
       <p className="ext-guide__title">Type into another app</p>
@@ -126,8 +174,8 @@ export function ExternalGuide({ session }: { session: Session }) {
         <li>After a {sec}-second countdown, the text is typed there with real key presses.</li>
       </ol>
       <p className="ext-guide__safety">
-        <ShieldCheck size={15} aria-hidden="true" /> Stops at once with <kbd>{STOP_SHORTCUT}</kbd> or by moving the mouse to the top-left corner. Pauses if you
-        click into another window, and never types into Typewriter itself or a password field it can detect.
+        <ShieldCheck size={15} aria-hidden="true" /> Stops at once with <kbd>{stop}</kbd> or by moving the mouse to the top-left corner. Pauses if you click into
+        another window, and never types into Typewriter itself or a password field it can detect.
       </p>
     </div>
   );
@@ -137,16 +185,17 @@ export function ExternalGuide({ session }: { session: Session }) {
 export function OutputSettings({ session }: { session: Session }) {
   const cid = useId();
   const running = session.snapshot.status === "playing" || session.snapshot.status === "paused";
-  if (!session.desktop)
+  if (session.host === "web")
     return (
       <div className="settings__group">
         <h3 className="settings__heading">Output</h3>
         <p className="callout callout--info output-note">
           <MonitorSmartphone size={16} aria-hidden="true" className="callout__icon" />
-          <span>This preview types inside Typewriter. To type into Google Docs or any other app, use the Typewriter desktop app.</span>
+          <span>This preview types inside Typewriter. To type into Google Docs or other apps, use the Typewriter Chrome extension or desktop app.</span>
         </p>
       </div>
     );
+  const inChrome = session.host === "extension";
   const { support } = session;
   return (
     <div className="settings__group">
@@ -157,7 +206,9 @@ export function OutputSettings({ session }: { session: Session }) {
         onChange={session.setDestination}
         options={[
           { value: "preview", label: "Preview here", title: "Type inside Typewriter's playback panel" },
-          { value: "external", label: "Into another app", title: "Type into the app you click into, like Google Docs" },
+          inChrome
+            ? { value: "external", label: "Into a web page", title: "Type into the page you click into, like Google Docs" }
+            : { value: "external", label: "Into another app", title: "Type into the app you click into, like Google Docs" },
         ]}
       />
       {running ? <p className="field__hint">Change this after the current session ends.</p> : null}
@@ -177,7 +228,18 @@ export function OutputSettings({ session }: { session: Session }) {
               </Button>
             ) : null}
           </div>
-          <Field label="Countdown before typing" htmlFor={cid} hint="Time to click into your document after leaving Typewriter.">
+          {inChrome ? (
+            <p className="field__hint" data-testid="permission-explainer">
+              Typing into pages uses Chrome's debugger permission, the only way an extension can send real key presses (Google Docs ignores simulated ones).
+              Typewriter uses it on one tab, only while typing, and only to type your text and check the focused field. It works in Chrome tabs only, not in
+              other apps.
+            </p>
+          ) : null}
+          <Field
+            label="Countdown before typing"
+            htmlFor={cid}
+            hint={inChrome ? "Time to click the insertion point in the page." : "Time to click into your document after leaving Typewriter."}
+          >
             <NumberInput
               id={cid}
               value={session.prefs.countdownSec}
@@ -187,12 +249,14 @@ export function OutputSettings({ session }: { session: Session }) {
               onCommit={(countdownSec) => session.updatePrefs({ countdownSec })}
             />
           </Field>
-          <Switch
-            checked={session.prefs.minimizeWhileTyping}
-            onChange={(minimizeWhileTyping) => session.updatePrefs({ minimizeWhileTyping })}
-            label="Minimise Typewriter while typing"
-            description="Brings your document back to the front. A small status window stays on top."
-          />
+          {!inChrome ? (
+            <Switch
+              checked={session.prefs.minimizeWhileTyping}
+              onChange={(minimizeWhileTyping) => session.updatePrefs({ minimizeWhileTyping })}
+              label="Minimise Typewriter while typing"
+              description="Brings your document back to the front. A small status window stays on top."
+            />
+          ) : null}
         </>
       ) : null}
     </div>

@@ -425,7 +425,7 @@ test("logo shows the light half in light theme and the dark half in dark theme, 
   expectMatch(after);
 });
 
-test("browser preview explains that typing into other apps needs the desktop app", async ({ page }) => {
-  await expect(page.getByText("To type into Google Docs or any other app, use the Typewriter desktop app.")).toBeVisible();
+test("browser preview explains that typing into other apps needs the extension or desktop app", async ({ page }) => {
+  await expect(page.getByText("To type into Google Docs or other apps, use the Typewriter Chrome extension or desktop app.")).toBeVisible();
   await expect(page.getByRole("radiogroup", { name: "Where to type" })).toHaveCount(0);
 });

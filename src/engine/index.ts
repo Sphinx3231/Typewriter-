@@ -6,3 +6,4 @@ export * from "./schedule";
 export * from "./buffer";
 export * from "./player";
 export { Rng, randomSeed } from "./rng";
+export * from "./keys";

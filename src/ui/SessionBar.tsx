@@ -67,7 +67,7 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
   if (arming) primary = { label: "Cancel", icon: <X size={17} />, onClick: session.stop, hint: "Esc", testid: "btn-cancel" };
   else if (externalMode && !playing && status !== "paused")
     primary = {
-      label: status === "completed" || status === "stopped" || status === "error" ? "Type again" : "Type into app",
+      label: status === "completed" || status === "stopped" || status === "error" ? "Type again" : session.host === "extension" ? "Type into page" : "Type into app",
       icon: <Keyboard size={17} />,
       onClick: session.start,
       disabled: !canStart,

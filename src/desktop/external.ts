@@ -116,7 +116,7 @@ export class ExternalController implements PlaybackDriver {
     this.info = { ...IDLE, phase: "waiting", countdownMs: this.options.countdownMs };
     this.emit();
     this.bridge
-      .start(this.timeline.events, this.options.countdownMs, this.options.minimize)
+      .start(this.timeline.events, this.options.countdownMs, this.options.minimize, this.source)
       .then((r) => {
         if (session !== this.session) return;
         this.info = { ...this.info, shortcutRegistered: r.shortcutRegistered };
@@ -229,7 +229,13 @@ export class ExternalController implements PlaybackDriver {
           this.error = "The keys sent don't add up to your text. Check the document.";
         } else {
           this.status = "completed";
-          this.info = { ...this.info, verification: "sent", verificationDetail: null };
+          const v = u.verification;
+          this.info =
+            v?.status === "verified"
+              ? { ...this.info, verification: "verified", verificationDetail: v.detail }
+              : v?.status === "mismatch"
+                ? { ...this.info, verification: "mismatch", verificationDetail: v.detail }
+                : { ...this.info, verification: "sent", verificationDetail: v?.detail ?? null };
         }
         break;
       case "stopped":

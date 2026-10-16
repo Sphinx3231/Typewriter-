@@ -13,6 +13,8 @@ export interface NativeUpdate {
   target: { windowId: string; processId: number; appName: string; title: string } | null;
   reason: string | null;
   message: string | null;
+  /** Read-back result, when the destination could be inspected (browser extension). */
+  verification?: { status: "verified" | "mismatch" | "unreadable"; detail: string };
 }
 
 export interface Support {
@@ -24,16 +26,14 @@ export interface Support {
 
 export interface Bridge {
   support(prompt: boolean): Promise<Support>;
-  start(events: TypingEvent[], countdownMs: number, minimize: boolean): Promise<{ shortcutRegistered: boolean }>;
+  start(events: TypingEvent[], countdownMs: number, minimize: boolean, source?: string): Promise<{ shortcutRegistered: boolean }>;
   control(command: "pause" | "resume" | "stop"): Promise<void>;
   readClipboard(): Promise<string>;
   onUpdate(fn: (u: NativeUpdate) => void): () => void;
   showMain(): Promise<void>;
 }
 
-export function isDesktop(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
+export { isDesktop } from "../platform";
 
 /** Only the fields the native side reads; keeps the payload small. */
 function slim(events: TypingEvent[]) {
