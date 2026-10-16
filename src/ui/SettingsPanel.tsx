@@ -163,8 +163,8 @@ export function SettingsPanel({ session }: { session: Session }) {
             <AlertTriangle size={16} aria-hidden="true" className="callout__icon" />
             <div>
               <p>
-                <strong>{longDuration(est.conflict.requestedMs)} is too short</strong> for this text with these realism settings. It needs at
-                least {longDuration(est.conflict.minimumMs)}, so playback will run at the fastest believable pace and take that long.
+                <strong>{longDuration(est.conflict.requestedMs)} is too short</strong> for this text with these pauses and corrections. Playback needs at
+                least {longDuration(est.conflict.minimumMs)}, so it will take that long.
               </p>
               <div className="callout__actions">
                 <Button size="sm" variant="secondary" onClick={() => session.applyDuration(est.conflict!.minimumMs / 1000)}>
@@ -176,6 +176,24 @@ export function SettingsPanel({ session }: { session: Session }) {
                   </Button>
                 ) : null}
               </div>
+            </div>
+          </div>
+        ) : null}
+        {!est.conflict && hasText && est.superhuman ? (
+          <div className="callout callout--info" role="status" data-testid="superhuman">
+            <Gauge size={16} aria-hidden="true" className="callout__icon" />
+            <div>
+              <p>
+                That's about <strong>{nf.format(Math.round(est.keystrokeWpm))} WPM</strong>, far faster than anyone types, so pauses and typos
+                will be hard to see. Playback still works.
+              </p>
+              {s.timingMode === "duration" ? (
+                <div className="callout__actions">
+                  <Button size="sm" variant="secondary" onClick={() => session.applyDuration(est.humanMinimumMs / 1000)}>
+                    Use {longDuration(est.humanMinimumMs)} (fast human pace)
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}

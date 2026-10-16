@@ -101,8 +101,14 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
           <dd data-testid="remaining">{clockDuration(remaining)}</dd>
         </div>
         <div className="metric">
-          <dt>Speed now</dt>
-          <dd>{playing || status === "paused" ? `${Math.round(snapshot.currentWpm)} WPM` : `${Math.round(estimate.effectiveWpm)} WPM avg`}</dd>
+          <dt>{playing || status === "paused" ? "Speed now" : "Speed"}</dt>
+          <dd>
+            {playing || status === "paused"
+              ? `${Math.round(snapshot.currentWpm)} WPM`
+              : idle
+                ? `${Math.round(estimate.effectiveWpm)} WPM avg`
+                : `${Math.round(snapshot.elapsedMs > 0 ? (snapshot.sourceDone / 5) / (snapshot.elapsedMs / 60_000) : 0)} WPM avg`}
+          </dd>
         </div>
         <div className="metric">
           <dt>Typed</dt>
@@ -112,7 +118,7 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
         </div>
         <div className="metric metric--wide">
           <dt>Finishes</dt>
-          <dd>{finishAt ? `around ${timeOfDay(finishAt)}` : status === "completed" ? "done" : "–"}</dd>
+          <dd>{finishAt ? `around ${timeOfDay(finishAt)}` : status === "completed" ? "done" : status === "paused" ? "paused" : "–"}</dd>
         </div>
       </dl>
 

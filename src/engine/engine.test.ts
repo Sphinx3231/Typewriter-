@@ -232,6 +232,15 @@ describe("timing", () => {
     expect(est.unitMs).toBe(MIN_UNIT_MS);
   });
 
+  it("marks speeds beyond human typing and suggests a human-paced duration", () => {
+    const fast = estimate(script, { timingMode: "duration", durationSec: 60, wpm: 60 });
+    expect(fast.conflict).toBeNull();
+    expect(fast.superhuman).toBe(true);
+    const human = estimate(script, { timingMode: "duration", durationSec: fast.humanMinimumMs / 1000, wpm: 60 });
+    expect(human.superhuman).toBe(false);
+    expect(estimate(script, { timingMode: "speed", durationSec: 0, wpm: 90 }).superhuman).toBe(false);
+  });
+
   it("event times are strictly ordered and never negative", () => {
     const tl = buildTimeline(script, { timingMode: "speed", durationSec: 0, wpm: 90 });
     for (let i = 1; i < tl.times.length; i++) expect(tl.times[i]).toBeGreaterThanOrEqual(tl.times[i - 1]);

@@ -210,9 +210,9 @@ kbd {
   gap: var(--sp-4);
   min-height: 68px;
   padding: var(--sp-3) var(--sp-6);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: saturate(1.4) blur(12px);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  backdrop-filter: saturate(1.4) blur(12px);
   border-bottom: 1px solid var(--border);
 }
 .topbar__brand-mobile {
@@ -559,6 +559,7 @@ kbd {
   display: inline-flex;
 }
 .segmented--sm .segmented__opt {
+  flex: 0 0 auto;
   height: 26px;
   padding: 0 8px;
   font-size: var(--fs-xs);
@@ -718,6 +719,11 @@ fieldset:disabled .segmented__opt {
 .callout--info {
   background: var(--accent-soft);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.callout--info .callout__icon {
+  color: var(--accent-text);
+  flex: none;
+  margin-top: 2px;
 }
 .callout__actions {
   display: flex;
@@ -998,7 +1004,7 @@ fieldset:disabled .segmented__opt {
   min-height: 380px;
   max-height: 62vh;
   overflow-y: auto;
-  padding: var(--sp-4) var(--sp-5) var(--sp-8) 60px;
+  padding: var(--sp-4) var(--sp-5) 64px 60px;
   background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.8em - 1px), var(--paper-rule) calc(1.8em - 1px), var(--paper-rule) 1.8em);
   background-attachment: local;
   background-position: 0 calc(var(--sp-4) + 0.2em);
@@ -1542,9 +1548,9 @@ fieldset:disabled .segmented__opt {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     padding: 6px max(8px, env(safe-area-inset-left, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-right, 0px));
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     border-top: 1px solid var(--border);
   }
   .tabbar__item {

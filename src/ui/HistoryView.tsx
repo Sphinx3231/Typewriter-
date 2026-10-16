@@ -66,7 +66,7 @@ export function HistoryView({ session }: { session: Session }) {
                   <th scope="col" className="num">Words</th>
                   <th scope="col" className="num">Characters</th>
                   <th scope="col" className="num">Duration</th>
-                  <th scope="col" className="num">Speed</th>
+                  <th scope="col" className="num">Avg speed</th>
                   <th scope="col" className="num">Typos</th>
                   <th scope="col">Status</th>
                   <th scope="col"><span className="sr-only">Actions</span></th>

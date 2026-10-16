@@ -5,8 +5,10 @@
 import type { Script, Step } from "./script";
 import type { PlaybackSettings } from "./settings";
 
-/** Fastest keystroke interval we will schedule (~600 WPM). Anything faster stops looking like typing. */
-export const MIN_UNIT_MS = 20;
+/** Fastest keystroke interval we will schedule (3,000 WPM): about one character per display frame at 240 Hz. */
+export const MIN_UNIT_MS = 4;
+/** Above this keystroke speed the result no longer looks like a person typing. */
+export const HUMAN_MAX_WPM = 220;
 const MS_PER_CHAR_AT_1_WPM = 12_000; // 1 word = 5 characters
 
 export type TypingEvent = Step & { at: number };
@@ -22,7 +24,11 @@ export interface Estimate {
   effectiveWpm: number;
   /** Keystroke speed in WPM while actually typing. */
   keystrokeWpm: number;
-  /** Set when the requested duration is too short for the chosen realism settings. */
+  /** Keystroke speed is beyond what a person could type; realism effects will be hard to see. */
+  superhuman: boolean;
+  /** Duration that would bring the keystroke speed back to HUMAN_MAX_WPM. */
+  humanMinimumMs: number;
+  /** Set when the requested duration is too short to fit the text with these realism settings. */
   conflict: null | {
     requestedMs: number;
     minimumMs: number;
@@ -64,6 +70,7 @@ export function estimate(script: Script, timing: Timing): Estimate {
   const pauseMs = script.pauseUnits * unitMs;
   const correctionMs = script.fixUnits * unitMs + script.fixedMs;
   const totalMs = units === 0 ? 0 : typingMs + pauseMs + correctionMs;
+  const keystrokeWpm = unitMs > 0 ? MS_PER_CHAR_AT_1_WPM / unitMs : 0;
   return {
     unitMs,
     totalMs,
@@ -71,7 +78,9 @@ export function estimate(script: Script, timing: Timing): Estimate {
     pauseMs,
     correctionMs,
     effectiveWpm: totalMs > 0 ? chars / 5 / (totalMs / 60_000) : 0,
-    keystrokeWpm: unitMs > 0 ? MS_PER_CHAR_AT_1_WPM / unitMs : 0,
+    keystrokeWpm,
+    superhuman: keystrokeWpm > HUMAN_MAX_WPM,
+    humanMinimumMs: Math.ceil(units * (MS_PER_CHAR_AT_1_WPM / HUMAN_MAX_WPM) + script.fixedMs),
     conflict,
   };
 }

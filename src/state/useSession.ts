@@ -165,7 +165,7 @@ export function useSession() {
         elapsedMs: snapshot.elapsedMs,
         mistakes: sessionStart.current.mistakes,
         timingMode: settings.timingMode,
-        wpm: Math.round(est.keystrokeWpm),
+        wpm: snapshot.elapsedMs > 0 ? Math.round(snapshot.sourceDone / 5 / (snapshot.elapsedMs / 60_000)) : 0,
         correction: settings.correction,
         mistakeLevel: settings.mistakes,
       };
