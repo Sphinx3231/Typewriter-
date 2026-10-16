@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+.env*
+!.env.example
+*.log
+.DS_Store
+.vite/
+tsconfig.tsbuildinfo
+target/
+src-tauri/gen/
+dist-extension/
+dist-extension-test/
+release/

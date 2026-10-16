@@ -1,0 +1,185 @@
+//! Typewriter desktop shell.
+//!
+//! The web app (../src) does all planning: it turns the text and settings into a
+//! timeline of typing events. For "Type into another app" it hands that timeline
+//! to `typewriter-native`, which sends real key events on its own thread, so
+//! timing doesn't depend on a background webview's timers. Status updates come
+//! back as `external://update` events to the main window and the small
+//! always-on-top status window ("hud").
+
+use std::sync::Mutex;
+use std::time::Duration;
+
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use typewriter_native::{check_support, spawn_session, Command, Config, Control, Event, Support};
+
+/// Emergency stop while typing into another app: Ctrl+Shift+Space (all platforms).
+fn stop_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space)
+}
+
+#[derive(Default)]
+struct AppState {
+    control: Mutex<Option<Control>>,
+}
+
+fn stop_session(app: &AppHandle) {
+    if let Some(c) = app.state::<AppState>().control.lock().unwrap().as_ref() {
+        c.send(Command::Stop);
+    }
+}
+
+#[tauri::command]
+fn external_support(prompt: bool) -> Support {
+    check_support(prompt)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartResult {
+    shortcut_registered: bool,
+}
+
+#[tauri::command]
+fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool) -> Result<StartResult, String> {
+    // Only one session at a time.
+    stop_session(&app);
+    let support = check_support(false);
+    if !support.available {
+        return Err(serde_json::to_string(&support).unwrap_or(support.message));
+    }
+
+    let gs = app.global_shortcut();
+    let _ = gs.unregister(stop_shortcut());
+    let shortcut_registered = gs.register(stop_shortcut()).is_ok();
+
+    show_hud(&app);
+    if minimize {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.minimize();
+        }
+    }
+
+    let cfg = Config { events, countdown_ms, resume_countdown_ms: 3000, own_pid: std::process::id() as u64 };
+    let handle = app.clone();
+    let (control, _join) = spawn_session(cfg, move |update| {
+        let done = matches!(update.phase.as_str(), "completed" | "stopped" | "failed");
+        let _ = handle.emit("external://update", &update);
+        if done {
+            let _ = handle.global_shortcut().unregister(stop_shortcut());
+            handle.state::<AppState>().control.lock().unwrap().take();
+            let h = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(6));
+                // Close the status window unless a new session has started meanwhile.
+                if h.state::<AppState>().control.lock().unwrap().is_none() {
+                    if let Some(hud) = h.get_webview_window("hud") {
+                        let _ = hud.close();
+                    }
+                }
+            });
+        }
+    })
+    .map_err(|s| serde_json::to_string(&s).unwrap_or(s.message))?;
+    *app.state::<AppState>().control.lock().unwrap() = Some(control);
+    Ok(StartResult { shortcut_registered })
+}
+
+#[tauri::command]
+fn external_control(app: AppHandle, command: String) -> Result<(), String> {
+    let cmd = match command.as_str() {
+        "pause" => Command::Pause,
+        "resume" => Command::Resume,
+        "stop" => Command::Stop,
+        other => return Err(format!("unknown command {other}")),
+    };
+    match app.state::<AppState>().control.lock().unwrap().as_ref() {
+        Some(c) => {
+            c.send(cmd);
+            Ok(())
+        }
+        None => Err("No typing session is running.".into()),
+    }
+}
+
+/// Reads the clipboard so the user can verify the document text (they copy it
+/// from the document themselves). Nothing is sent anywhere.
+#[tauri::command]
+fn read_clipboard() -> Result<String, String> {
+    arboard::Clipboard::new().and_then(|mut c| c.get_text()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn show_main(app: AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+fn show_hud(app: &AppHandle) {
+    if let Some(hud) = app.get_webview_window("hud") {
+        let _ = hud.show();
+        return;
+    }
+    let mut b = WebviewWindowBuilder::new(app, "hud", WebviewUrl::App("hud.html".into()))
+        .title("Typewriter status")
+        .inner_size(360.0, 132.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false);
+    // Top-right corner of the primary monitor.
+    if let Ok(Some(m)) = app.primary_monitor() {
+        let scale = m.scale_factor();
+        let w = m.size().width as f64 / scale;
+        b = b.position(w - 380.0, 24.0);
+    }
+    let _ = b.build();
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() == ShortcutState::Pressed && *shortcut == stop_shortcut() {
+                        stop_session(app);
+                    }
+                })
+                .build(),
+        )
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![external_support, external_start, external_control, read_clipboard, show_main])
+        .setup(|app| {
+            // The window starts hidden so there's no flash before the theme is applied.
+            // The web app shows it after its first paint; this is a fallback.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(2500));
+                if let Some(main) = handle.get_webview_window("main") {
+                    if !main.is_visible().unwrap_or(true) {
+                        let _ = main.show();
+                    }
+                }
+            });
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing the main window ends any typing session and the app.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    stop_session(window.app_handle());
+                    if let Some(hud) = window.app_handle().get_webview_window("hud") {
+                        let _ = hud.close();
+                    }
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running Typewriter");
+}

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Typewriter",
+  "short_name": "Typewriter",
+  "version": "1.0.0",
+  "description": "Types your text into a web page, like Google Docs, the way a person would: natural rhythm, pauses and corrected typos.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Open Typewriter",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["sidePanel"],
+  "optional_permissions": ["debugger", "clipboardRead"],
+  "commands": {
+    "stop-typing": {
+      "suggested_key": { "default": "Alt+Shift+Period" },
+      "description": "Stop typing immediately"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self'"
+  }
+}

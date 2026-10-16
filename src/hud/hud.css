@@ -1,0 +1,106 @@
+html,
+body.hud-body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+  font: 13px/1.4 var(--font-ui);
+}
+.hud {
+  box-sizing: border-box;
+  min-height: 100vh;
+  align-content: start;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+.hud__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.hud__text {
+  display: grid;
+  min-width: 0;
+}
+.hud__text strong {
+  font-size: 14px;
+}
+.hud__text span {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--progress-track);
+  overflow: hidden;
+}
+.hud__bar div {
+  height: 100%;
+  background: var(--progress-fill);
+  transform-origin: left;
+  transition: transform 200ms linear;
+}
+.hud__actions {
+  justify-content: flex-end;
+}
+.hud__hint {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.hud kbd {
+  font: 11px var(--font-mono);
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+.hud button {
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.hud button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.hud--paused .hud__text strong,
+.hud--resuming .hud__text strong {
+  color: var(--warning);
+}
+.hud--completed .hud__text strong {
+  color: var(--success);
+}
+.hud .logo-mark {
+  --logo-size: 30px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--logo-size);
+  height: var(--logo-size);
+  border-radius: 24%;
+  overflow: hidden;
+  background: var(--logo-tile);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.hud .logo-mark__art {
+  width: calc(var(--logo-size) / 2);
+  height: var(--logo-size);
+  background-image: url("../assets/brand/logo.png");
+  background-repeat: no-repeat;
+  background-size: 200% 100%;
+  background-position: var(--logo-pos);
+}
