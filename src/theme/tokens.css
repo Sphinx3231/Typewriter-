@@ -1,0 +1,158 @@
+/*
+ * Typewriter design tokens. Every component reads colors from here.
+ * Light: purple (brand), white (surfaces), cyan (progress, focus, highlights).
+ * Dark:  near-black (ground), charcoal (surfaces), red (brand), orange (progress, highlights).
+ */
+:root {
+  /* type */
+  --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  /* spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* radius */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* ---- light theme (default) ---- */
+  --bg: #f6f6fb;
+  --bg-tint: radial-gradient(1200px 600px at 100% -10%, rgba(6, 182, 212, 0.07), transparent 60%),
+    radial-gradient(900px 500px at -10% 0%, rgba(124, 58, 237, 0.06), transparent 55%);
+  --surface: #ffffff;
+  --surface-2: #fbfaff;
+  --surface-3: #f3f1fa;
+  --paper: #ffffff;
+  --paper-rule: rgba(124, 58, 237, 0.06);
+  --text: #1e293b;
+  --text-muted: #5b6577;
+  --text-subtle: #8a94a6;
+  --border: #e5e3f0;
+  --border-strong: #d4d0e4;
+
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --primary-active: #5b21b6;
+  --primary-fill: #7c3aed;
+  --primary-soft: #f2ecff;
+  --primary-soft-2: #e6dbff;
+  --on-primary: #ffffff;
+  --primary-text: #6d28d9;
+
+  --accent: #06b6d4;
+  --accent-strong: #0e7490;
+  --accent-soft: #e4f8fb;
+  --accent-text: #0e7490;
+
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: #fdecec;
+  --danger-text: #b91c1c;
+  --success: #15803d;
+  --success-soft: #e6f5ec;
+  --warning: #b45309;
+  --warning-soft: #fdf3e2;
+
+  --focus-ring: 0 0 0 3px rgba(6, 182, 212, 0.45);
+  --caret: #0891b2;
+  --typo-bg: rgba(220, 38, 38, 0.12);
+  --typo-text: #b91c1c;
+  --typo-line: #dc2626;
+  --fix-bg: rgba(6, 182, 212, 0.2);
+  --selection: rgba(124, 58, 237, 0.18);
+
+  --progress-track: #ece9f6;
+  --progress-fill: linear-gradient(90deg, #7c3aed 0%, #06b6d4 100%);
+
+  --shadow-sm: 0 1px 2px rgba(30, 27, 60, 0.05);
+  --shadow-md: 0 1px 2px rgba(30, 27, 60, 0.05), 0 8px 24px -12px rgba(60, 36, 140, 0.18);
+  --shadow-lg: 0 24px 60px -24px rgba(60, 36, 140, 0.35);
+  --glow-primary: 0 6px 18px -6px rgba(124, 58, 237, 0.55);
+  --glow-active: 0 0 0 1px rgba(124, 58, 237, 0.18), 0 10px 30px -14px rgba(124, 58, 237, 0.4);
+
+  --logo-from: #8b5cf6;
+  --logo-to: #06b6d4;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0d;
+  --bg-tint: radial-gradient(1100px 600px at 100% -10%, rgba(249, 115, 22, 0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 0%, rgba(239, 68, 68, 0.07), transparent 55%);
+  --surface: #141418;
+  --surface-2: #19191e;
+  --surface-3: #212128;
+  --paper: #111115;
+  --paper-rule: rgba(249, 115, 22, 0.05);
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-subtle: #75757f;
+  --border: #26262d;
+  --border-strong: #35353e;
+
+  --primary: #ef4444;
+  --primary-hover: #f05a5a;
+  --primary-active: #dc2626;
+  --primary-fill: #dc2626;
+  --primary-soft: rgba(239, 68, 68, 0.12);
+  --primary-soft-2: rgba(239, 68, 68, 0.2);
+  --on-primary: #ffffff;
+  --primary-text: #f87171;
+
+  --accent: #f97316;
+  --accent-strong: #fb923c;
+  --accent-soft: rgba(249, 115, 22, 0.12);
+  --accent-text: #fb923c;
+
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --danger-text: #fca5a5;
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+
+  --focus-ring: 0 0 0 3px rgba(249, 115, 22, 0.5);
+  --caret: #f97316;
+  --typo-bg: rgba(239, 68, 68, 0.2);
+  --typo-text: #fca5a5;
+  --typo-line: #ef4444;
+  --fix-bg: rgba(249, 115, 22, 0.25);
+  --selection: rgba(239, 68, 68, 0.28);
+
+  --progress-track: #24242b;
+  --progress-fill: linear-gradient(90deg, #ef4444 0%, #f97316 100%);
+
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 28px -16px rgba(0, 0, 0, 0.9);
+  --shadow-lg: 0 30px 70px -30px rgba(0, 0, 0, 0.95);
+  --glow-primary: 0 6px 20px -8px rgba(239, 68, 68, 0.6);
+  --glow-active: 0 0 0 1px rgba(239, 68, 68, 0.22), 0 12px 34px -18px rgba(239, 68, 68, 0.45);
+
+  --logo-from: #ef4444;
+  --logo-to: #f97316;
+
+  color-scheme: dark;
+}
