@@ -33,7 +33,7 @@ It's built with [Tauri 2](https://tauri.app) (MIT/Apache-2.0). The window runs t
 You need Node 22, Rust (stable) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system. On Debian/Ubuntu:
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev pkg-config patchelf
 npm ci
 npm run desktop:build      # installers in src-tauri/target/release/bundle/
 ```
