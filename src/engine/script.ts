@@ -201,7 +201,10 @@ export function buildScript(source: string, opts: RealismOptions): Script {
       return i + k;
     };
     const p = commonPrefix(T, word);
-    const s = commonSuffix(T, word, p);
+    let s = commonSuffix(T, word, p);
+    // A dropped letter leaves nothing wrong to point at; treat the letter after the gap as the
+    // error so it is highlighted and gets retyped along with the missing one.
+    if (T.length - s - p === 0 && s > 0) s--;
     const method = chooseMethod(opts.correction);
     mistakes++;
 

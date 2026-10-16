@@ -335,3 +335,25 @@ test("reduced motion: caret doesn't blink", async ({ browser }) => {
   expect(anim).toBe("none");
   await ctx.close();
 });
+
+test("chaos: rapid random clicks on every control never corrupt the output", async ({ page }) => {
+  await setText(page, TRICKY);
+  await pick(page, "Typing mistakes", "Medium");
+  await setDuration(page, 0, 5);
+  const ids = ["btn-start", "btn-pause", "btn-resume", "btn-stop", "btn-restart", "theme-switch", "btn-shuffle"];
+  let seed = 1234;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 120; i++) {
+    const id = ids[Math.floor(rand() * ids.length)];
+    const el = page.getByTestId(id);
+    if ((await el.count()) && (await el.isEnabled())) await el.click({ timeout: 1000 }).catch(() => {});
+    if (rand() < 0.3) await page.waitForTimeout(Math.floor(rand() * 250));
+  }
+  // Bring it home: whatever state we're in, play a full run.
+  const s = await status(page).textContent();
+  if (s === "Paused") await page.getByTestId("btn-resume").click();
+  else if (s !== "Typing") await page.getByTestId("btn-start").click();
+  await expect(status(page)).toHaveText("Complete", { timeout: 20_000 });
+  expect(await output(page)).toBe(TRICKY);
+  await expect(page.getByTestId("verified-badge")).toBeVisible();
+});
