@@ -357,3 +357,42 @@ test("chaos: rapid random clicks on every control never corrupt the output", asy
   expect(await output(page)).toBe(TRICKY);
   await expect(page.getByTestId("verified-badge")).toBeVisible();
 });
+
+test("typing sounds play only when enabled and stop instantly when switched off", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __clicks: number; AudioContext: typeof AudioContext };
+    w.__clicks = 0;
+    const Orig = w.AudioContext;
+    w.AudioContext = class extends Orig {
+      createBufferSource() {
+        w.__clicks++;
+        return super.createBufferSource();
+      }
+    } as typeof AudioContext;
+  });
+  await page.reload();
+  const clicks = () => page.evaluate(() => (window as unknown as { __clicks: number }).__clicks);
+  await setText(page, "Sound check, sound check. ".repeat(4));
+  await setDuration(page, 0, 4);
+
+  // Off by default: no clicks.
+  await page.getByTestId("btn-start").click();
+  await page.waitForTimeout(1200);
+  expect(await clicks()).toBe(0);
+  await page.getByTestId("btn-stop").click();
+
+  // On: clicks happen.
+  await page.getByRole("switch", { name: "Typing sounds" }).click();
+  await page.getByTestId("btn-start").click();
+  await page.waitForTimeout(1200);
+  const during = await clicks();
+  expect(during).toBeGreaterThan(5);
+
+  // Switched off mid-playback: no more clicks, playback continues.
+  await page.getByRole("switch", { name: "Typing sounds" }).click();
+  await page.waitForTimeout(100);
+  const atOff = await clicks();
+  await page.waitForTimeout(1000);
+  expect(await clicks()).toBe(atOff);
+  await expect(status(page)).toHaveText("Complete", { timeout: 10_000 });
+});
