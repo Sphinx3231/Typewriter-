@@ -45,6 +45,7 @@ export interface HistoryEntry {
 }
 
 const MAX_HISTORY = 200;
+const DEBOUNCE_ABOVE_CHARS = 20_000;
 /** Above this size the editor warns that planning may take a moment. Text is never truncated. */
 export const LARGE_TEXT_CHARS = 150_000;
 
@@ -89,7 +90,17 @@ export function useSession() {
   }, [history]);
 
   // ---- derived planning ----
-  const deferredText = useDeferredValue(text);
+  // Short texts re-plan on every change (deferred so typing stays snappy);
+  // long texts wait for a short pause in editing before planning.
+  const deferred = useDeferredValue(text);
+  const [debounced, setDebounced] = useState(text);
+  const isLong = text.length > DEBOUNCE_ABOVE_CHARS;
+  useEffect(() => {
+    if (!isLong) return;
+    const id = setTimeout(() => setDebounced(text), 350);
+    return () => clearTimeout(id);
+  }, [text, isLong]);
+  const deferredText = isLong ? debounced : deferred;
   const planning = deferredText !== text;
   const realism = realismKey(settings);
   const graphemesStats = useMemo(() => computeStats(deferredText), [deferredText]);
