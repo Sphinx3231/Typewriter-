@@ -167,6 +167,19 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
           {copied ? "Copied" : "Copy text"}
         </Button>
       </div>
+      <p className="sr-only" aria-live="polite" data-testid="announce">
+        {status === "playing"
+          ? "Typing started."
+          : status === "paused"
+            ? `Paused at ${pctLabel} percent.`
+            : status === "completed"
+              ? "Typing complete. The output matches your text exactly."
+              : status === "stopped"
+                ? `Stopped at ${pctLabel} percent.`
+                : status === "error"
+                  ? snapshot.error ?? "Playback error."
+                  : ""}
+      </p>
       {!canStart && idle ? (
         <p className="session-bar__hint">{blank ? "Add some text to start." : issues[0]?.message}</p>
       ) : session.settingsChangedSinceStart ? (

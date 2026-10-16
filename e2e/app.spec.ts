@@ -299,3 +299,39 @@ for (const width of [360, 390, 768, 1024, 1280, 1920]) {
     }
   });
 }
+
+test("keyboard-only use: reach and operate the main controls with visible focus", async ({ page }) => {
+  await page.getByTestId("editor").fill("Keyboard only.");
+  // Theme switch works from the keyboard.
+  await page.getByTestId("theme-switch").focus();
+  const before = await page.locator("html").getAttribute("data-theme");
+  await page.keyboard.press("Enter");
+  expect(await page.locator("html").getAttribute("data-theme")).not.toBe(before);
+  // Segmented controls move with arrow keys.
+  const mistakes = page.getByRole("radiogroup", { name: "Typing mistakes" });
+  await mistakes.getByRole("radio", { checked: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(mistakes.getByRole("radio", { name: "Medium" })).toHaveAttribute("aria-checked", "true");
+  // Start button is reachable and shows a focus ring.
+  const start = page.getByTestId("btn-start");
+  await start.focus();
+  const ring = await start.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(ring).not.toBe("none");
+  await page.keyboard.press("Enter");
+  await expect(status(page)).toHaveText("Typing");
+  await expect(page.getByTestId("announce")).toHaveText("Typing started.");
+  await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+  await expect(page.getByTestId("announce")).toContainText("matches your text exactly");
+});
+
+test("reduced motion: caret doesn't blink", async ({ browser }) => {
+  const ctx = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await ctx.newPage();
+  await page.goto("/");
+  await page.getByTestId("editor").fill("Reduced motion check, typed slowly enough to look at the caret.");
+  await page.getByTestId("btn-start").click();
+  await page.waitForTimeout(800);
+  const anim = await page.locator(".paper__text .caret").evaluate((el) => getComputedStyle(el).animationName);
+  expect(anim).toBe("none");
+  await ctx.close();
+});
