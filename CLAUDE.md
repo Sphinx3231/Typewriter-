@@ -31,8 +31,9 @@ The app runs entirely on the user's device:
   fetched from a CDN at runtime. Sounds are synthesized with Web Audio.
 - Preferences live in local browser storage only.
 - The reference sheet shows a "Connect to Google Docs" destination. Typewriter never uses a
-  Google (or any other) API for this. The desktop app types into Google Docs, or any other app,
-  by sending real key presses through the operating system, locally (see `docs/DESKTOP.md`).
+  Google (or any other) API for this. The Chrome extension types into a Chrome tab with trusted
+  key input through `chrome.debugger` (see `docs/EXTENSION.md`). The desktop app types into any
+  app by sending real key presses through the operating system (see `docs/DESKTOP.md`). Both are local.
 
 ### 3. The user's text is untouchable
 The final output must equal the source text exactly, character for character (see SPEC §2).
@@ -71,9 +72,11 @@ npm run test:e2e     # browser tests (Playwright, uses the preinstalled Chromium
 npm run test:native  # native typing engine tests (Rust)
 npm run test:desktop # desktop end-to-end: packaged app types into a real Chromium window
                      # (needs Xvfb, openbox, xdotool, tauri-driver; build first)
+npm run extension:build # Chrome extension: dist-extension/ + release/typewriter-extension-<v>.zip
+npm run test:extension  # extension end-to-end in real Chromium (builds a test variant too)
 npm run desktop:dev  # run the desktop app in development
 npm run desktop:build # build desktop installers (src-tauri/target/release/bundle/)
 npm run lint         # typecheck only
 ```
 
-Desktop details, permissions and limitations: `docs/DESKTOP.md`.
+Desktop details, permissions and limitations: `docs/DESKTOP.md`. Chrome extension: `docs/EXTENSION.md`.

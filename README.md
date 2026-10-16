@@ -4,10 +4,14 @@
 
 Typewriter takes a block of text and types it out keystroke by keystroke, like a real person would, over the time you choose. Pauses, small rhythm changes and the odd typo come with it. Every typo is corrected on screen, and the finished text always matches what you pasted, character for character.
 
-Use it in the browser to watch the text typed in Typewriter's own window. Or use the **desktop app** to have it typed into another app, such as Google Docs, Word or Notes, with real key presses. Everything runs on your device: no account, no server, no AI, no tracking.
+Use it in the browser to watch the text typed in Typewriter's own window. Or use the **Chrome extension** to have it typed into a web page such as Google Docs, or the **desktop app** to type into any app, such as Word or Notes. Both type with real key presses. Everything runs on your device: no account, no server, no AI, no tracking.
 
 ## Features
 
+- **Types into web pages** (Chrome extension, in the side panel). Click into your document, and after a countdown Typewriter types there with trusted key input.
+  - Stop with the button, Alt+Shift+., or by closing the panel.
+  - It pauses if you switch tabs or fields, stops on navigation, and refuses password and hidden fields.
+  - It reads the result back where the page allows it. Google Docs can't be read back, so it says so. See [`docs/EXTENSION.md`](docs/EXTENSION.md).
 - **Types into other apps** (desktop app). Click into your document, and after a countdown Typewriter types there.
   - Emergency stop: Ctrl+Shift+Space, or move the mouse to the top-left corner.
   - It pauses if you switch windows, never types into itself, and refuses password and login fields.
@@ -35,6 +39,16 @@ Use it in the browser to watch the text typed in Typewriter's own window. Or use
   - `Ctrl/⌘ + Shift + C` copies
 - **Accessibility and layout.** Works on phone, tablet and desktop, with AA contrast, screen-reader announcements and reduced-motion support.
 
+## Chrome extension
+
+Install (Load unpacked), permissions, privacy and limitations are in [`docs/EXTENSION.md`](docs/EXTENSION.md).
+
+```bash
+npm run extension:build  # unpacked extension in dist-extension/, ZIP in release/
+```
+
+The extension isn't on the Chrome Web Store.
+
 ## Desktop app
 
 Install and permission steps are in [`docs/DESKTOP.md`](docs/DESKTOP.md).
@@ -61,6 +75,8 @@ npm run dev        # http://localhost:5173
 | `npm run test:e2e` | Browser tests (Playwright; build first) |
 | `npm run test:native` | Native typing engine tests (Rust) |
 | `npm run test:desktop` | Packaged desktop app types into a real Chromium window (Linux, X11) |
+| `npm run extension:build` | Build the Chrome extension and its ZIP |
+| `npm run test:extension` | Extension tests: real Chromium types into real pages |
 | `npm run desktop:dev` / `desktop:build` | Run the desktop app / build its installers |
 | `npm run lint` | Typecheck only |
 

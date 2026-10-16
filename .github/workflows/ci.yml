@@ -21,6 +21,24 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 
+  extension:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: typewriter-chrome-extension
+          path: release/typewriter-extension-*.zip
+          if-no-files-found: error
+
   native:
     runs-on: ubuntu-latest
     timeout-minutes: 20

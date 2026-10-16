@@ -16,7 +16,8 @@ export async function ownTabId(): Promise<number | null> {
   }
 }
 
-export function chromeBrowser(): Browser {
+/** `onAttachChange` reports the attached tab (or null), so the service worker can release it if this page closes. */
+export function chromeBrowser(onAttachChange: (tabId: number | null) => void = () => {}): Browser {
   let tabId: number | null = null;
   let own: number | null | undefined;
   const listeners = new Set<(e: BrowserEvent) => void>();
@@ -25,6 +26,7 @@ export function chromeBrowser(): Browser {
   const onDetach = (src: chrome.debugger.Debuggee, reason: string) => {
     if (src.tabId !== undefined && src.tabId === tabId) {
       tabId = null;
+      onAttachChange(null);
       emit({ type: "detached", reason });
     }
   };
@@ -54,6 +56,7 @@ export function chromeBrowser(): Browser {
     async attach(id: number) {
       await chrome.debugger.attach({ tabId: id }, "1.3");
       tabId = id;
+      onAttachChange(id);
       await send("Page.enable");
       // Lets the page keep its text cursor while you click Typewriter's controls.
       await send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
@@ -61,6 +64,7 @@ export function chromeBrowser(): Browser {
     async detach() {
       const id = tabId;
       tabId = null;
+      onAttachChange(null);
       if (id !== null) await chrome.debugger.detach({ tabId: id }).catch(() => {});
     },
     async probe(): Promise<FocusProbe | null> {

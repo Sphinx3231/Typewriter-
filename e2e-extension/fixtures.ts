@@ -13,7 +13,8 @@ export const test = base.extend<Fixtures>({
   context: async ({ extDir }, use) => {
     const dir = mkdtempSync(join(tmpdir(), "tw-ext-"));
     const ctx = await chromium.launchPersistentContext(dir, {
-      executablePath,
+      // Extensions need full Chromium (new headless), not Playwright's headless shell.
+      ...(executablePath ? { executablePath } : { channel: "chromium" }),
       headless: process.env.HEADED ? false : true,
       viewport: null,
       args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`, "--window-size=1200,900", "--no-first-run"],

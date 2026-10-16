@@ -346,6 +346,31 @@ test.describe("safety", () => {
     expect(await value(target, "#ta")).toBe("");
   });
 
+  test("closing the Typewriter panel stops typing and releases the tab", async ({ panel, target, sw }) => {
+    await target.locator("#ta").focus();
+    await prepare(panel, "The panel closes while this is being typed, so typing must stop.", { seconds: 10 });
+    await start(panel);
+    await expect.poll(() => value(target, "#ta"), { timeout: 10_000 }).not.toBe("");
+    await panel.close();
+    await target.waitForTimeout(300);
+    const atClose = await value(target, "#ta");
+    await target.waitForTimeout(2500);
+    expect(await value(target, "#ta")).toBe(atClose);
+    // The extension's debugging session ends with it (no lingering "started debugging" bar):
+    // the extension can attach again only if its previous session was released.
+    const id = await targetTabId(sw);
+    const reattach = await sw.evaluate(async (t) => {
+      try {
+        await chrome.debugger.attach({ tabId: t }, "1.3");
+        await chrome.debugger.detach({ tabId: t });
+        return "released";
+      } catch (e) {
+        return String(e);
+      }
+    }, id);
+    expect(reattach).toBe("released");
+  });
+
   test("closing the tab stops typing", async ({ panel, target, sw }) => {
     await target.locator("#ta").focus();
     await prepare(panel, "The tab closes while this is being typed.", { seconds: 10 });

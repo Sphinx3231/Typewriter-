@@ -9,6 +9,8 @@ import { chromeBrowser } from "./chromeBrowser";
 import { ChromeTypingSession } from "./session";
 
 export const STOP_MESSAGE = "typewriter:stop";
+/** Port name for telling the service worker which tab is attached (it releases the tab if this page closes). */
+export const SESSION_PORT = "typewriter:session";
 
 /** The keyboard shortcut Chrome actually assigned to "Stop typing" (users can change it). */
 export async function stopShortcut(): Promise<string> {
@@ -39,6 +41,23 @@ function requestDebugger(): Promise<boolean> {
 export function extensionBridge(): Bridge {
   const listeners = new Set<(u: NativeUpdate) => void>();
   let session: ChromeTypingSession | null = null;
+
+  // Keep the service worker informed of the attached tab. If this page closes mid-session,
+  // the port disconnects and the worker detaches the debugger, so nothing is left attached.
+  let port: chrome.runtime.Port | null = null;
+  let attachedTab: number | null = null;
+  const report = (tabId: number | null) => {
+    attachedTab = tabId;
+    if (!port && tabId === null) return;
+    if (!port) {
+      port = chrome.runtime.connect({ name: SESSION_PORT });
+      port.onDisconnect.addListener(() => {
+        port = null; // the worker restarted; reconnect and report again
+        if (attachedTab !== null) report(attachedTab);
+      });
+    }
+    port.postMessage({ tabId });
+  };
 
   // Emergency stop from the keyboard shortcut (relayed by the service worker).
   chrome.runtime.onMessage.addListener((msg) => {
@@ -73,7 +92,7 @@ export function extensionBridge(): Bridge {
         throw JSON.stringify(s);
       }
       session?.send("stop");
-      const s = new ChromeTypingSession(chromeBrowser(), events, { countdownMs, resumeCountdownMs: 3000, source }, (u) => listeners.forEach((fn) => fn(u as NativeUpdate)));
+      const s = new ChromeTypingSession(chromeBrowser(report), events, { countdownMs, resumeCountdownMs: 3000, source }, (u) => listeners.forEach((fn) => fn(u as NativeUpdate)));
       session = s;
       void s.run().finally(() => {
         if (session === s) session = null;
