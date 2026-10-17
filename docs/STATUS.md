@@ -13,12 +13,28 @@ Two bugs reported from real use. Both had a root cause in the code; neither was 
 
 | Bug | Root cause | Fix | Evidence |
 |---|---|---|---|
-| **"Type into app" spends its time preparing and often never types** (desktop) | On Windows, `external_start` was a *synchronous* Tauri command that created the status window. Tauri documents that creating a window in a synchronous command deadlocks on Windows: the status window stayed blank and Start never returned. It only happened when the status window didn't already exist (it closes 6 s after a session), so it was "frequent", not constant. Around it: the UI showed "waiting" before the engine was ready, a Stop pressed during that time was lost, and the keyboard preparation had no time limit, no progress and couldn't be cancelled while waiting for the previous session's cleanup. | `external_start` is async. New **preparing** phase ("Getting ready", with progress) shown in the app and the status window. Limits: 15 s for the keyboard to become available (after that, preparing symbols up front is cut short and the rest are bound as they're typed), 20 s for the typing engine to answer at all (UI safety net), 3 min to pick a target window; each failure explains itself and types nothing. Stop/Cancel works in every phase, including before Start has returned. Each session carries an id end to end, and starts run one at a time, so a session stopped just before a new Start can't take over the new one (found by an independent review of this fix, with regression tests). A session that sent no keys is reported as failed, never as done. When the focused window can't be read (Windows: admin apps), the wait says so instead of waiting silently. | Unit and native regression tests fail on the old code and pass now; Linux desktop E2E 21/21 (new check: Cancel while getting ready). Windows: see the Windows end-to-end row below. |
+| **"Type into app" spends its time preparing and often never types** (desktop) | On Windows, `external_start` was a *synchronous* Tauri command that created the status window. Tauri documents that creating a window in a synchronous command deadlocks on Windows: the status window stayed blank and Start never returned. It only happened when the status window didn't already exist (it closes 6 s after a session), so it was "frequent", not constant. Around it: the UI showed "waiting" before the engine was ready, a Stop pressed during that time was lost, and the keyboard preparation had no time limit, no progress and couldn't be cancelled while waiting for the previous session's cleanup. | `external_start` is async. New **preparing** phase ("Getting ready", with progress) shown in the app and the status window. Limits: 15 s for the keyboard to become available (after that, preparing symbols up front is cut short and the rest are bound as they're typed), 20 s for the typing engine to answer at all (UI safety net), 3 min to pick a target window; each failure explains itself and types nothing. Stop/Cancel works in every phase, including before Start has returned. Each session carries an id end to end, and starts run one at a time, so a session stopped just before a new Start can't take over the new one (found by an independent review of this fix, with regression tests). A session that sent no keys is reported as failed, never as done. When the focused window can't be read (Windows: admin apps), the wait says so instead of waiting silently. | Unit and native regression tests fail on the old code and pass now. Linux desktop E2E 22/22 (new checks: Cancel while getting ready; Cancel and Start again at once). **Real Windows desktop** (GitHub `windows-2022` runner): the old build reproduced the bug: the status window never showed its controls and the app stopped responding (Desktop builds run 12). The fixed build passed all 6 Windows checks (run 16), including exact typing into a native Windows text box. |
 | **The extension could never type** | `"debugger"` was an *optional* permission. Chrome doesn't allow it to be optional: `chrome.permissions.request` fails with "Only permissions specified in the manifest may be requested", with no prompt. The automated tests used a build that pre-granted it, which hid this. | `debugger` is a required permission (Chrome shows it once when the extension is loaded). A manifest test fails if any never-optional permission is listed as optional; a new test types with the release build (nothing pre-granted). The "Type into page" label was also cut off in a narrow side panel; fixed with a test at 320/360/400 px. | Release-build typing test: fails on the old build, passes now. Real Chromium 141 window, real clicks through the toolbar: the side panel shows the full UI on a fresh load and after a full browser restart, with no console errors; it typed exactly into a page; Pause, Resume, Stop and Alt+Shift+. worked. |
 
 **The "blank pop-up":** the extension's side panel rendered correctly in every real-UI check (fresh load, restart, the old main-branch build too). The blank window that matches the report is the desktop **status window** on Windows, caused by the deadlock above. Which one you saw still needs confirming on your machine.
 
-**Not verified here:** your laptop, real Google Docs, macOS. See the QA report's manual checklist.
+**Not verified here:** your laptop (a GitHub-hosted Windows runner is not your machine), real Google Docs, macOS. See [`MANUAL-QA.md`](MANUAL-QA.md).
+
+### Test runs for these fixes (2026-10-17)
+
+| Suite | Command | Result |
+|---|---|---|
+| Typecheck | `npm run lint` | clean |
+| Unit | `npm test` | **223 passed** |
+| Native | `npm run test:native` | **all passed** (21 session tests, incl. preparation cut short, Stop before any key) |
+| Desktop end-to-end (X11) | `npx tauri build --no-bundle && npm run test:desktop` | **22 passed** |
+| Real Wayland | `npm run test:desktop:wayland` | **4 passed** |
+| Extension | `npm run test:extension` | **30 passed** (incl. the release build typing with nothing pre-granted) |
+| Extension, real browser UI | Chromium 141 on Xvfb, real toolbar clicks (xdotool), shipped `dist-extension` | side panel full UI on a fresh load and after a full restart; typed exactly into a page; Verified |
+| Windows end-to-end | `node e2e-desktop/windows.mjs` on GitHub `windows-2022` (Desktop builds workflow) | old app (run 12): **frozen**; fixed app (run 16, `bd403ed`): **6 passed** |
+| Builds | Desktop builds run 16 | Linux, Windows, macOS installers and native tests: **success** |
+
+The Windows harness runs the real `typewriter.exe` through tauri-driver and plays the user with real `SendInput` clicks and shortcut presses; the target is a native WinForms text box. Screenshots are in the run's `windows-e2e-screenshots` artifact.
 
 ## Priority
 
@@ -83,9 +99,8 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 - **Google Docs itself.** No Google account here, and the network policy blocks Google. The input path is verified into a real Chromium text area. Use **Check copied text** the first time.
 - **Other real third-party apps** (Word, LibreOffice, Notes…): not run here.
 - **Windows and macOS.**
-  - Installers are built by CI but haven't been launched.
-  - The Windows code type-checks locally; the macOS code compiles only in CI.
-  - Session-logic tests run on both in CI.
+  - Windows: the real app runs end to end on a GitHub-hosted Windows Server 2022 runner (6 checks, see above). The installers (`.msi`, `.exe`) are built by CI but haven't been installed and launched.
+  - macOS: compiles and runs the session-logic tests in CI only; the app hasn't been launched.
 - **A full GNOME/KDE Wayland desktop.** Tested under headless Weston with XWayland, not on a full desktop session.
 - **The `.rpm` on Fedora/openSUSE.** The package and its binary are verified here, but `dnf`/`zypper` dependency resolution and the menu entry there are not.
 - **Intel Macs.** There's no x86-64 macOS build.

@@ -166,10 +166,11 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
 
   The session tests also run on Windows and macOS in CI.
 - **Text integrity (`npm test`):** 14 tricky inputs × 4 realism settings × 5 seeds. Both the typed result and the keys sent must reproduce the source exactly.
-- **Desktop end-to-end (`npm run test:desktop`):** the real packaged app, on a real X11 display (Xvfb + openbox), types into a real Chromium window. WebDriver drives Typewriter's UI; xdotool plays the user (clicks, window switches, shortcut presses); the document is read back over the DevTools protocol. Nothing in the input path is mocked. 21 checks:
+- **Desktop end-to-end (`npm run test:desktop`):** the real packaged app, on a real X11 display (Xvfb + openbox), types into a real Chromium window. WebDriver drives Typewriter's UI; xdotool plays the user (clicks, window switches, shortcut presses); the document is read back over the DevTools protocol. Nothing in the input path is mocked. 22 checks:
   - startup and logo; theme switching, persistence and real repainting;
   - nothing typed while Typewriter has focus;
   - Cancel while the keyboard is still being prepared types nothing, removes the temporary key bindings, and the next session types exactly;
+  - Cancel and Start again at once: the cancelled session can't take over the new one;
   - exact Unicode/typo text; punctuation and spacing edge cases;
   - more distinct symbols than free key codes; back-to-back sessions;
   - 1,500 characters in 12 s;
@@ -181,6 +182,7 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
   - Wayland refusal.
 
   After the emergency stop, the mouse-corner stop, Stop in the status window and "Keep Typewriter open", it checks that the source text is unchanged.
+- **Windows end-to-end (`node e2e-desktop/windows.mjs`, in the Desktop builds workflow on `windows-2022`):** the real `typewriter.exe` on a real Windows desktop session, driven through tauri-driver; real `SendInput` clicks and Ctrl+Shift+Space; the target is a native WinForms text box. 6 checks: launch; Type into app answers at once and the status window shows its controls; tricky Unicode text with typos arrives exactly; pause/resume from the status window; clicking another window pauses and nothing goes there; emergency stop. On a failure it prints the app's state, the status window's state and the focused window. (`windows-2022` because WebView2 on the newer image ignores the remote-debugging flag on the elevated runner.)
 - **Real Wayland session (`npm run test:desktop:wayland`):** the packaged app runs as a native Wayland client under headless Weston with XWayland. It checks that typing into other apps is refused with the explanation, and that the preview reproduces Unicode text exactly. Needs `weston` and `Xwayland`.
 
 ---
@@ -188,11 +190,9 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
 ## Known limitations
 
 - **Google Docs end-to-end is not verified.** This environment has no Google account and no network access to Google. The same mechanism is verified into a real Chromium text area. To check it yourself, use **Check copied text**.
-- **Windows and macOS are unverified.** There is no Intel macOS build.
-  - Their installers come from CI and haven't been launched.
-  - The Windows code type-checks locally.
-  - The macOS code compiles only in CI (a dependency needs Apple's SDK).
-  - The session logic tests do run on both in CI.
+- **Windows is verified on a GitHub-hosted runner only, macOS not at all.** There is no Intel macOS build.
+  - Windows: the end-to-end checks above pass on Windows Server 2022. The installers come from CI and haven't been installed and launched; nothing has run on a personal Windows laptop.
+  - macOS: compiles only in CI (a dependency needs Apple's SDK); the session logic tests run there. The app hasn't been launched.
 - **Restart isn't offered in "Into another app" mode.** The text already typed would be duplicated. Undo it in your document, then type again.
 - **Resume relies on the window keeping its caret.** Switching windows normally does this. If you click somewhere else in the document before resuming, typing continues from where you clicked.
 - **No password-field detection on Linux.** Only the window-title check applies there.
