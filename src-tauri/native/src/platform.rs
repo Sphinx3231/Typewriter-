@@ -16,6 +16,56 @@ impl WindowInfo {
     pub fn same_window(&self, other: &WindowInfo) -> bool {
         self.process_id == other.process_id && self.window_id == other.window_id
     }
+
+    /// True for web browsers, whose one window holds many tabs.
+    pub fn is_browser(&self) -> bool {
+        let name = self.app_name.to_lowercase();
+        const BROWSERS: [&str; 15] = ["chrome", "chromium", "microsoft edge", "microsoft-edge", "msedge", "opera", "firefox", "brave", "vivaldi", "safari", "browser", "yandex", "librewolf", "waterfox", "thorium"];
+        name == "arc" || BROWSERS.iter().any(|b| name.contains(b))
+    }
+
+    /// Which tab of a browser window is showing, from the window title (a browser
+    /// window's title is its active tab's title). Markers that a page adds or changes
+    /// on its own (unread counts, unsaved/edited marks) are left out.
+    pub fn tab_key(&self) -> String {
+        tab_key(&self.title)
+    }
+
+    /// The same browser window, now showing another tab.
+    pub fn other_tab_of(&self, target: &WindowInfo) -> bool {
+        if !self.same_window(target) || !target.is_browser() {
+            return false;
+        }
+        let (now, then) = (self.tab_key(), target.tab_key());
+        !now.is_empty() && !then.is_empty() && now != then
+    }
+}
+
+/// A window title without the markers pages and editors add on their own: a leading
+/// "(3) " or "[2] " unread count, a leading or trailing "*", "●" or "•" (unsaved), and a
+/// trailing "— Edited".
+pub fn tab_key(title: &str) -> String {
+    let mut t = title.trim();
+    loop {
+        let before = t;
+        t = t.trim_start_matches(['*', '●', '•']).trim_end_matches(['*', '●', '•']).trim();
+        for (open, close) in [('(', ')'), ('[', ']')] {
+            if let Some(rest) = t.strip_prefix(open) {
+                if let Some(end) = rest.find(close) {
+                    let inner = &rest[..end];
+                    if !inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit() || c == '+' || c == ',') {
+                        t = rest[end + close.len_utf8()..].trim_start();
+                    }
+                }
+            }
+        }
+        for suffix in [" — Edited", " - Edited"] {
+            t = t.strip_suffix(suffix).unwrap_or(t).trim_end();
+        }
+        if t == before {
+            return t.to_string();
+        }
+    }
 }
 
 /// Everything the session asks of the desktop.
@@ -516,5 +566,52 @@ mod os {
     /// password field. The window-title check in the session still applies.
     pub fn sensitive_focus() -> Option<String> {
         None
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    fn w(app: &str, title: &str) -> WindowInfo {
+        WindowInfo { window_id: "1".into(), process_id: 2, app_name: app.into(), title: title.into() }
+    }
+
+    #[test]
+    fn browsers_are_recognised_by_name() {
+        for app in ["Opera Internet Browser", "Google Chrome", "Microsoft Edge", "Firefox", "Brave Browser", "Vivaldi", "Safari", "Arc", "Chromium", "msedge"] {
+            assert!(w(app, "").is_browser(), "{app}");
+        }
+        for app in ["Notepad", "Microsoft Word", "Knowledge Edge Base", "Archive Utility", ""] {
+            assert!(!w(app, "").is_browser(), "{app}");
+        }
+    }
+
+    #[test]
+    fn tab_keys_ignore_marks_a_page_or_editor_adds_itself() {
+        assert_eq!(tab_key("  (3) Inbox - Gmail - Opera "), "Inbox - Gmail - Opera");
+        assert_eq!(tab_key("[12] Chat"), "Chat");
+        assert_eq!(tab_key("(1,204) Mail"), "Mail");
+        assert_eq!(tab_key("*Untitled - Notepad"), "Untitled - Notepad");
+        assert_eq!(tab_key("● main.rs - VS Code"), "main.rs - VS Code");
+        assert_eq!(tab_key("Notes.txt — Edited"), "Notes.txt");
+        assert_eq!(tab_key("Report - Edited"), "Report");
+        assert_eq!(tab_key("(draft) Essay"), "(draft) Essay");
+        assert_eq!(tab_key("()"), "()");
+        assert_eq!(tab_key("(5"), "(5");
+        assert_eq!(tab_key(""), "");
+    }
+
+    #[test]
+    fn another_tab_means_the_same_browser_window_with_a_different_page() {
+        let docs = w("Google Chrome", "Essay - Google Docs - Google Chrome");
+        assert!(w("Google Chrome", "YouTube - Google Chrome").other_tab_of(&docs));
+        assert!(!w("Google Chrome", "(2) Essay - Google Docs - Google Chrome").other_tab_of(&docs));
+        assert!(!w("Google Chrome", "").other_tab_of(&docs), "an untitled moment isn't a tab change");
+        let mut elsewhere = w("Google Chrome", "YouTube - Google Chrome");
+        elsewhere.window_id = "9".into();
+        assert!(!elsewhere.other_tab_of(&docs), "another window is a focus change, not a tab change");
+        let notepad = w("Notepad", "Untitled - Notepad");
+        assert!(!w("Notepad", "Other - Notepad").other_tab_of(&notepad), "only browsers have tabs here");
     }
 }

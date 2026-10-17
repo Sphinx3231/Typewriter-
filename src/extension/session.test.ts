@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildScript, buildTimeline, DEFAULT_SETTINGS, VirtualField, type KeyAction } from "../engine";
-import { ChromeTypingSession, verifyField, type Browser, type BrowserEvent, type FocusProbe, type SessionUpdate, type TabInfo } from "./session";
+import { buildScript, buildTimeline, DEFAULT_SETTINGS, VirtualField, type KeyAction, type TypingEvent } from "../engine";
+import { ChromeTypingSession, verifyField, type Browser, type BrowserEvent, type FocusProbe, type SessionOptions, type SessionUpdate, type TabInfo } from "./session";
 
 /** Virtual time: sleeping advances the clock and fires scheduled hooks. */
 class FakeClock {
@@ -403,5 +403,218 @@ describe("field verification", () => {
   });
   it("is unreadable when either side can't be read", () => {
     expect(verifyField(p({ text: null }), p({ text: "x" }), "x")?.status).toBe("unreadable");
+  });
+});
+
+describe("Chrome typing session: edge and failure paths", () => {
+  const step = (at: number, s: Partial<TypingEvent>) => ({ u: 1, p: 0, at, ...s }) as TypingEvent;
+  const typed = (text: string, gap = 10) => [...text].map((ch, i) => step(i * gap, { kind: "type", text: ch }));
+
+  function manual(events: TypingEvent[], source: string, opts: Partial<SessionOptions> = {}) {
+    const clock = new FakeClock();
+    const browser = new FakeBrowser(clock);
+    const updates: SessionUpdate[] = [];
+    const session = new ChromeTypingSession(browser, events, { countdownMs: 1000, resumeCountdownMs: 500, source, ...opts }, (u) => updates.push(u), clock);
+    const last = () => updates[updates.length - 1];
+    const phases = () => updates.map((u) => u.phase).filter((p, i, a) => p !== a[i - 1]);
+    return { clock, browser, updates, session, last, phases };
+  }
+  /** Pause mid-typing (by the user) after the n-th key, run `whilePaused`, and resume `after` ms later unless told not to. */
+  function pauseAt(s: ReturnType<typeof manual> | ReturnType<typeof setup>, n: number, whilePaused: () => void, resumeAfter: number | null = 1000) {
+    let pausedAt = -1;
+    s.browser.onSend = (k) => {
+      if (k !== n) return;
+      pausedAt = s.clock.t;
+      s.session.send("pause");
+      whilePaused();
+      if (resumeAfter !== null) s.clock.at(pausedAt + resumeAfter, () => s.session.send("resume"));
+    };
+    return () => pausedAt;
+  }
+
+  it("completes an empty timeline at once without touching any tab", async () => {
+    const s = manual([], "");
+    expect(await s.session.run()).toBe("completed");
+    expect(s.browser.attaches).toEqual([]);
+    expect(s.browser.detaches).toBe(0);
+    expect(s.updates).toHaveLength(1);
+    expect(s.last()).toMatchObject({ phase: "completed", totalMs: 0, index: 0, target: null });
+  });
+
+  it("names a page without a host generically", async () => {
+    const s = manual(typed("abc"), "abc");
+    s.browser.href = "about:blank";
+    expect(await s.session.run()).toBe("completed");
+    expect(s.last().target).toMatchObject({ appName: "page", windowId: "7", title: "Example form" });
+  });
+
+  it("restarts the countdown when the same tab comes back after no tab was eligible", async () => {
+    const s = manual(typed("abc"), "abc", { countdownMs: 3000 });
+    s.clock.at(1000, () => (s.browser.tab = null));
+    s.clock.at(2000, () => (s.browser.tab = { id: 7, windowId: 1 }));
+    expect(await s.session.run()).toBe("completed");
+    expect(s.browser.attaches).toEqual([7]);
+    expect(s.phases().slice(0, 4)).toEqual(["countdown", "waiting", "countdown", "typing"]);
+    expect(s.browser.sent[0].at).toBeGreaterThanOrEqual(5000);
+    expect(s.browser.field.text()).toBe("abc");
+  });
+
+  it("carries on when detaching from a previous tab or at the end fails", async () => {
+    const s = manual(typed("abc"), "abc", { countdownMs: 3000 });
+    s.browser.detach = async () => {
+      s.browser.detaches++;
+      throw new Error("Debugger is not attached to the tab");
+    };
+    s.clock.at(1000, () => (s.browser.tab = { id: 8, windowId: 1 }));
+    expect(await s.session.run()).toBe("completed");
+    expect(s.browser.attaches).toEqual([7, 8]);
+    expect(s.browser.detaches).toBe(2);
+    expect(s.last().phase).toBe("completed");
+    expect(s.browser.field.text()).toBe("abc");
+  });
+
+  it("pauses when the page can't be inspected, and continues once it can", async () => {
+    const s = manual(typed("hello world", 200), "hello world");
+    const real = s.browser.probe.bind(s.browser);
+    let blind = false;
+    (s.browser as Browser).probe = async () => (blind ? null : real());
+    let at = 0;
+    s.browser.onSend = (n) => {
+      if (n !== 3) return;
+      at = s.clock.t;
+      blind = true;
+      s.clock.at(at + 1000, () => s.session.send("resume"));
+      s.clock.at(at + 3000, () => (blind = false));
+    };
+    expect(await s.session.run()).toBe("completed");
+    expect(s.updates.some((u) => u.phase === "paused" && u.reason === "focus-unknown")).toBe(true);
+    expect(s.updates.some((u) => u.reason === "waiting-for-target")).toBe(true);
+    expect(s.browser.sent.slice(3).every((x) => x.at >= at + 3000)).toBe(true);
+    expect(s.browser.field.text()).toBe("hello world");
+  });
+
+  it("can be stopped while paused, sending nothing more", async () => {
+    const s = manual(typed("hello world"), "hello world");
+    const pausedAt = pauseAt(s, 4, () => {}, null);
+    s.clock.at(10_000, () => s.session.send("stop"));
+    expect(await s.session.run()).toBe("stopped");
+    expect(s.last()).toMatchObject({ phase: "stopped", reason: "user" });
+    expect(s.browser.sent).toHaveLength(4);
+    expect(pausedAt()).toBeGreaterThan(0);
+    expect(s.browser.attached).toBeNull();
+  });
+
+  it("stops between the keys of a single multi-key event", async () => {
+    // Typing "abc" then moving the caret to the start is one event made of three Left presses.
+    const s = manual([...typed("abc"), step(40, { kind: "caret", to: 0 })], "abc");
+    s.browser.onSend = (n) => {
+      if (s.browser.sent[n - 1].action.kind === "left") s.session.send("stop");
+    };
+    expect(await s.session.run()).toBe("stopped");
+    expect(s.browser.sent.map((x) => x.action.kind)).toEqual(["text", "text", "text", "left"]);
+    expect(s.last().reason).toBe("user");
+  });
+
+  it("fails, and detaches, when a key can't be sent", async () => {
+    const s = manual(typed("abc"), "abc");
+    const real = s.browser.send.bind(s.browser);
+    s.browser.send = async (a) => {
+      if (s.browser.sent.length === 1) throw new Error("Input domain unavailable");
+      return real(a);
+    };
+    expect(await s.session.run()).toBe("failed");
+    expect(s.last()).toMatchObject({ phase: "failed", reason: "send-failed" });
+    expect(s.last().message).toMatch(/Couldn't send a key: Error: Input domain unavailable/);
+    expect(s.browser.sent).toHaveLength(1);
+    expect(s.browser.attached).toBeNull();
+  });
+
+  it("reports a stop, not a failure, when the send fails because the tab went away or navigated", async () => {
+    for (const ev of [{ type: "detached", reason: "target_closed" }, { type: "navigated" }] as BrowserEvent[]) {
+      const s = manual(typed("abc"), "abc");
+      const real = s.browser.send.bind(s.browser);
+      s.browser.send = async (a) => {
+        if (s.browser.sent.length === 2) {
+          s.browser.fireEvent(ev);
+          throw new Error("Debugger is not attached");
+        }
+        return real(a);
+      };
+      expect(await s.session.run()).toBe("stopped");
+      expect(s.last()).toMatchObject({ phase: "stopped", reason: "detached", message: "The tab went away while typing." });
+      expect(s.browser.sent).toHaveLength(2);
+    }
+  });
+
+  it("can't verify when the page can't be read after typing", async () => {
+    for (const fail of [async () => null, async () => Promise.reject(new Error("Target closed"))]) {
+      const s = manual(typed("ab"), "ab");
+      const real = s.browser.probe.bind(s.browser);
+      let done = false;
+      (s.browser as Browser).probe = async () => (done ? fail() : real());
+      s.browser.onSend = (n) => {
+        if (n === 2) done = true;
+      };
+      expect(await s.session.run()).toBe("completed");
+      expect(s.last().verification).toEqual({ status: "unreadable", detail: "Couldn't read the page after typing." });
+      expect(s.browser.field.text()).toBe("ab");
+    }
+  });
+
+  it("stops if the page navigates or Chrome detaches while paused", async () => {
+    const cases: [BrowserEvent, string][] = [
+      [{ type: "navigated" }, "navigated"],
+      [{ type: "detached", reason: "canceled_by_user" }, "detached"],
+    ];
+    for (const [ev, reason] of cases) {
+      const s = manual(typed("hello world"), "hello world");
+      pauseAt(s, 4, () => s.clock.at(s.clock.t + 500, () => s.browser.fireEvent(ev)), null);
+      expect(await s.session.run()).toBe("stopped");
+      expect(s.last()).toMatchObject({ phase: "stopped", reason });
+      expect(s.browser.sent).toHaveLength(4);
+    }
+  });
+
+  it("can be stopped during the resume countdown", async () => {
+    const s = manual(typed("hello world"), "hello world", { resumeCountdownMs: 3000 });
+    const pausedAt = pauseAt(s, 4, () => {}, 1000);
+    s.browser.onSend = ((orig) => (n: number) => {
+      orig(n);
+      if (n === 4) s.clock.at(pausedAt() + 2000, () => s.session.send("stop"));
+    })(s.browser.onSend);
+    expect(await s.session.run()).toBe("stopped");
+    expect(s.phases().slice(-3)).toEqual(["paused", "resuming", "stopped"]);
+    expect(s.last().reason).toBe("user");
+    expect(s.browser.sent).toHaveLength(4);
+  });
+
+  it("can be stopped while waiting to get back to the original field", async () => {
+    const s = manual(typed("hello world"), "hello world");
+    pauseAt(s, 4, () => (s.browser.elementId = "el-2"), 1000);
+    s.clock.at(8000, () => s.session.send("stop"));
+    expect(await s.session.run()).toBe("stopped");
+    expect(s.updates.some((u) => u.reason === "waiting-for-target")).toBe(true);
+    expect(s.last()).toMatchObject({ phase: "stopped", reason: "user" });
+    expect(s.browser.sent).toHaveLength(4);
+  });
+
+  it("stops after resuming if the page changed while paused", async () => {
+    // A URL change (single-page app) while paused: found by the check after the resume countdown.
+    const spa = manual(typed("hello world"), "hello world");
+    pauseAt(spa, 4, () => (spa.browser.href = "https://example.com/elsewhere"), 1000);
+    expect(await spa.session.run()).toBe("stopped");
+    expect(spa.last()).toMatchObject({ phase: "stopped", reason: "detached", message: "The page navigated or the tab went away, so typing stopped." });
+    expect(spa.browser.sent).toHaveLength(4);
+
+    // A reload during the resume countdown.
+    const nav = manual(typed("hello world"), "hello world", { resumeCountdownMs: 2000 });
+    const pausedAt = pauseAt(nav, 4, () => {}, 1000);
+    nav.browser.onSend = ((orig) => (n: number) => {
+      orig(n);
+      if (n === 4) nav.clock.at(pausedAt() + 1500, () => nav.browser.fireEvent({ type: "navigated" }));
+    })(nav.browser.onSend);
+    expect(await nav.session.run()).toBe("stopped");
+    expect(nav.last()).toMatchObject({ phase: "stopped", reason: "navigated" });
+    expect(nav.browser.sent).toHaveLength(4);
   });
 });

@@ -105,6 +105,12 @@ const FOCUS_SETTLE: Duration = Duration::from_millis(300);
 
 const TICK: Duration = Duration::from_millis(10);
 
+/// How often a session waiting for its window checks whether the window is back.
+const RECHECK: Duration = Duration::from_millis(150);
+
+/// The second half of every automatic pause message.
+const BACK: &str = "Click back into your document and it continues by itself.";
+
 const EMIT_EVERY: Duration = Duration::from_millis(40);
 
 /// Every distinct character the timeline types, in order of first appearance.
@@ -383,8 +389,11 @@ impl<D: Desktop> Session<D> {
             self.settled = t0.elapsed();
         }
         match focused {
-            None => return Some(("focus-unknown", "Lost track of the focused window. Paused to be safe.".into())),
-            Some(w) if self.is_own(&w) => return Some(("focus-typewriter", "Typewriter has focus, so typing paused. It never types into itself.".into())),
+            None => return Some(("focus-unknown", format!("Lost track of the focused window, so typing is waiting. {BACK}"))),
+            Some(w) if self.is_own(&w) => return Some(("focus-typewriter", format!("Typewriter has focus, so typing is waiting (it never types into itself). {BACK}"))),
+            Some(w) if w.other_tab_of(&target) => {
+                return Some(("tab-changed", format!("You switched to another tab, so typing is waiting. Go back to the tab \"{}\" and it continues by itself.", target.title)));
+            }
             Some(w) if !w.same_window(&target) => {
                 // Some windows (pop-ups, overlays) have no title: name the app instead.
                 let name = if !w.title.trim().is_empty() {
@@ -394,7 +403,7 @@ impl<D: Desktop> Session<D> {
                 } else {
                     "another window".into()
                 };
-                return Some(("focus-changed", format!("Focus moved to \"{name}\", so typing paused.")));
+                return Some(("focus-changed", format!("Focus moved to \"{name}\", so typing is waiting. {BACK}")));
             }
             Some(w) => {
                 if let Some(why) = sensitive_title(&w.title) {
@@ -450,7 +459,13 @@ impl<D: Desktop> Session<D> {
                 if !waited {
                     let held = self.desktop.held_modifiers().join(", ");
                     self.log(format!("waiting for modifier keys to be released before key #{}: reported held: {held}", self.keys_sent + 1));
-                    self.update("typing", 0.0, Some("modifiers-held"), Some("Waiting for you to release Ctrl, Alt, Shift or Cmd.".into()));
+                    // Name the key when the platform can tell, so a key stuck "down" can be found.
+                    let msg = if held.is_empty() {
+                        "Waiting for you to release Ctrl, Alt, Shift or Cmd.".to_string()
+                    } else {
+                        format!("Waiting for you to release {held}. If you aren't holding it, press and release it once.")
+                    };
+                    self.update("typing", 0.0, Some("modifiers-held"), Some(msg));
                     waited = true;
                 }
                 if let Some(Command::Stop) = self.control.take() {
@@ -528,9 +543,17 @@ impl<D: Desktop> Session<D> {
 
     /// Paused until Resume (then a short countdown and waiting for the target to
     /// have focus again) or Stop. Returns None when stopped.
+    ///
+    /// A pause the session made by itself (focus or tab moved, a password field, focus
+    /// unknown) also ends by itself: as soon as the target window and tab have focus
+    /// again, the short countdown runs and typing continues. Pressing Pause meanwhile
+    /// turns it into the user's pause, which only Resume ends.
     fn pause(&mut self, reason: &str, message: String, anchor: &mut Instant) -> Option<()> {
         let paused_at = Instant::now();
+        let mut auto = reason != "user";
+        let mut explicit = false;
         self.update("paused", 0.0, Some(reason), Some(message));
+        let mut last_check = Instant::now();
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
@@ -539,13 +562,28 @@ impl<D: Desktop> Session<D> {
                 }
                 Some(Command::Resume) => {
                     self.log("resume requested");
+                    explicit = true;
                     break;
+                }
+                Some(Command::Pause) if auto => {
+                    self.log("paused by the user while waiting for the target");
+                    auto = false;
+                    self.update("paused", 0.0, Some("user"), Some("Paused.".into()));
                 }
                 _ => {}
             }
             if self.desktop.failsafe_triggered() {
                 self.stop("failsafe", Some("Stopped: mouse moved to the top-left corner.".into()));
                 return None;
+            }
+            if auto && last_check.elapsed() >= RECHECK {
+                last_check = Instant::now();
+                let back = self.guard().is_none();
+                self.settled = Duration::ZERO;
+                if back {
+                    self.log("the target has focus again: continuing by itself");
+                    break;
+                }
             }
             std::thread::sleep(TICK);
         }
@@ -563,6 +601,17 @@ impl<D: Desktop> Session<D> {
             self.update("resuming", left, None, None);
             std::thread::sleep(Duration::from_millis(100).min(Duration::from_secs_f64(left / 1000.0)));
         }
+        // Resume pressed while the target window shows another tab: the user chose to
+        // continue in this tab (for example, a page that renamed itself), so it becomes
+        // the target.
+        if explicit {
+            if let (Some(t), Some(w)) = (self.target.clone(), self.desktop.focused_window()) {
+                if w.other_tab_of(&t) {
+                    self.log("resumed in another tab of the target window: that tab is the target now");
+                    self.target = Some(w);
+                }
+            }
+        }
         // Wait until the target window has focus again (never type elsewhere).
         let mut announced = false;
         loop {
@@ -576,6 +625,8 @@ impl<D: Desktop> Session<D> {
                     let title = self.target.as_ref().map(|t| t.title.clone()).unwrap_or_default();
                     let msg = if reason == "sensitive" {
                         "A password or login field has focus. Click back into your document.".to_string()
+                    } else if reason == "tab-changed" {
+                        format!("Go back to the tab \"{title}\" to continue typing.")
                     } else {
                         format!("Click back into \"{title}\" to continue typing.")
                     };

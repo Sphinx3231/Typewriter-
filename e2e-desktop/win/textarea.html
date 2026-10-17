@@ -10,5 +10,9 @@
   </head>
   <body>
     <textarea id="t" spellcheck="false"></textarea>
+    <script>
+      // textarea.html#Essay is titled "Essay - Plain text field", so tabs can be told apart.
+      if (location.hash) document.title = decodeURIComponent(location.hash.slice(1)) + " - Plain text field";
+    </script>
   </body>
 </html>

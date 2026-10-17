@@ -699,6 +699,53 @@ async function main() {
     sid = null;
   });
 
+  /** Asks the window manager to close a window, like the taskbar's "Close window" (works on minimized windows). */
+  const wmClose = (id) => execFileSync("wmctrl", ["-i", "-c", `0x${Number(id).toString(16)}`], { env });
+  const hidden = (id) => /_NET_WM_STATE_HIDDEN/.test(execFileSync("xprop", ["-id", id, "_NET_WM_STATE"], { env }).toString());
+  const appGone = (pid) => () => !existsSync(`/proc/${pid}`);
+  /** A fresh tauri-driver, after the previous app process has exited. */
+  const restartDriver = async () => {
+    for (const p of procs.filter((p) => p.spawnargs[0] === "tauri-driver")) p.kill("SIGTERM");
+    await sleep(800);
+    bg("tauri-driver", ["--port", "4444"]);
+    await until(() => fetch(`${WD}/status`).then((r) => r.ok).catch(() => false), 15000, "tauri-driver");
+  };
+
+  await check("closing while minimized (as from the taskbar) brings the window back with the question; Quit exits", async () => {
+    await restartDriver();
+    await openApp();
+    await ui(`(__tw.setText("Unsaved words."), 1)`);
+    await sleep(400);
+    const id = await mainWindow();
+    const appPid = xdo("getwindowpid", id);
+    xdo("windowminimize", "--sync", id);
+    await until(() => hidden(id), 5000, "the window to be minimized");
+    wmClose(id);
+    await until(() => ui(`!!document.querySelector('[data-testid="quit-dialog"]')?.open`), 5000, "quit confirmation");
+    await until(() => !hidden(id), 5000, "the window to come back from minimized, so the question can be seen");
+    shot("desktop-quit-from-minimized");
+    await ui(`(__tw.click("quit-confirm"), 1)`).catch(() => {});
+    await until(appGone(appPid), 15000, "the Typewriter process to exit");
+    sid = null;
+  });
+
+  await check("a page that doesn't answer can't keep Typewriter open: closing still exits", async () => {
+    await restartDriver();
+    await openApp();
+    await ui(`(__tw.setText("Unsaved words."), 1)`);
+    await sleep(400);
+    const id = await mainWindow();
+    const appPid = xdo("getwindowpid", id);
+    // Hang the page's JavaScript for good, as a blank or frozen window would be.
+    await js(`setTimeout(() => { for (;;) {} }, 50); return 1;`);
+    await sleep(500);
+    const t0 = Date.now();
+    wmClose(id);
+    await until(appGone(appPid), 15000, "the Typewriter process to exit although its page is hung");
+    console.log(`    exited ${((Date.now() - t0) / 1000).toFixed(1)} s after the close request`);
+    sid = null;
+  });
+
   await check("on a Wayland session it explains the limit and won't start typing into other apps", async () => {
     for (const p of procs.filter((p) => p.spawnargs[0] === "tauri-driver")) p.kill("SIGTERM");
     await sleep(800);

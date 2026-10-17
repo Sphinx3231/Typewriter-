@@ -166,6 +166,20 @@ const hud = () =>
       buttons: [...document.querySelectorAll("button")].map((b) => b.dataset.testid), text: document.body.innerText.trim() };`);
 const hudClick = (testid) => inHud(`document.querySelector('[data-testid="${testid}"]').click(); return 1;`);
 
+/**
+ * The status window as it really is on the screen: a screen capture of its rectangle (not its
+ * HTML, which WebDriver can read even when nothing is painted). A blank window is one colour.
+ * The capture is printed as base64 so the CI log alone shows what the user would see.
+ */
+function hudPixels(name) {
+  const file = join(SHOTS ?? work, `${name}.png`);
+  const out = ps("input.ps1", "capture", "Typewriter status", file);
+  const [w, h, colours, dominant, b64] = out.split(" ");
+  console.log(`    status window on screen (${name}): ${w}x${h} px, ${colours} colours, the most common colour covers ${(Number(dominant) * 100).toFixed(1)}%`);
+  console.log(`    PNG-BASE64 ${name} ${b64}`);
+  assert(Number(colours) >= 12 && Number(dominant) < 0.97, `the status window looks blank on screen (${colours} colours, ${(Number(dominant) * 100).toFixed(1)}% one colour)`);
+}
+
 // ---------------------------------------------------------------- target windows
 const targets = {};
 async function openTarget(key, title, x, y) {
@@ -539,6 +553,77 @@ async function typeIntoTarget(t) {
   }
 }
 
+// ---------------------------------------------------------------- switching browser tabs
+/**
+ * Two tabs in one browser window. Typing goes into the first; the user presses Ctrl+Tab (real
+ * keys) mid-session: nothing may go into the other tab, and typing waits. Ctrl+Tab back: it
+ * continues by itself and the first tab ends with the exact text.
+ */
+async function tabSwitchCheck(name, exe, port) {
+  const profile = mkdtempSync(join(tmpdir(), `tw-tabs-${name}-`));
+  const page = `file:///${PLAIN.replace(/\\/g, "/")}`;
+  const p = spawn(
+    exe,
+    [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--remote-allow-origins=*", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate", "--window-position=60,40", "--window-size=960,640", "--new-window", `${page}#Essay`, `${page}#Other`],
+    { stdio: "ignore" },
+  );
+  procs.push(p);
+  const text = "Typed into the Essay tab only, even when another tab is opened. ".repeat(2).trim();
+  const value = (tab) => cdpEval(port, `#${tab}`, "document.getElementById('t').value");
+  const visible = (tab) => cdpEval(port, `#${tab}`, "document.visibilityState === 'visible'");
+  try {
+    await until(async () => (await cdpEval(port, "#Essay", "!!document.getElementById('t')")) && (await cdpEval(port, "#Other", "!!document.getElementById('t')")), 30000, `${name} to open both tabs`);
+    // Show the Essay tab, the way a user clicks it.
+    const list = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+    await fetch(`http://127.0.0.1:${port}/json/activate/${list.find((x) => x.url.endsWith("#Essay")).id}`, { signal: AbortSignal.timeout(5000) });
+    await until(() => visible("Essay"), 5000, "the Essay tab to show");
+    await configure(text, { seconds: 16, mistakes: "Off", countdown: 3 });
+    await start();
+    const [x, y] = await pagePoint(port, "#Essay", "#t", 100, 40);
+    const hidden = ps("input.ps1", "hideconsoles");
+    if (hidden) console.log(`    ${hidden.split("\n").join("\n    ")}`);
+    ps("input.ps1", "click", x, y);
+    await until(async () => /^Essay - Plain text field/.test(ps("input.ps1", "fg")), 3000, `the Essay tab to have focus after the click`);
+    await until(async () => (await value("Essay")).length > 8, 20000, "typing to begin in the Essay tab");
+    ps("input.ps1", "keys", "ctrltab");
+    await until(() => visible("Other"), 5000, "Ctrl+Tab to show the other tab");
+    const h = await until(async () => {
+      const v = await hud();
+      return v?.phase === "paused" ? v : null;
+    }, 5000, "typing to wait after the tab switch");
+    console.log(`    after Ctrl+Tab the status window says: ${JSON.stringify(h.label)} ${JSON.stringify(h.detail)}`);
+    assert(/another tab/i.test(h.detail), `the wait isn't explained: ${JSON.stringify(h)}`);
+    hudPixels(`win-hud-tab-${name.toLowerCase()}`);
+    await sleep(500);
+    const atSwitch = await value("Essay");
+    await sleep(1500);
+    assert((await value("Other")) === "", `keys went into the other tab: ${JSON.stringify(await value("Other"))}`);
+    assert((await value("Essay")) === atSwitch, "the Essay tab kept changing while the other tab showed");
+    shot(`win-tabs-${name.toLowerCase()}-waiting`);
+    ps("input.ps1", "keys", "ctrltab");
+    await until(() => visible("Essay"), 5000, "Ctrl+Tab to show the Essay tab again");
+    // No Resume: going back to the tab is enough.
+    await until(async () => (await hudPhase()) === "completed", 60000, "typing to continue by itself and complete");
+    await sleep(400);
+    shot(`win-tabs-${name.toLowerCase()}-completed`);
+    assert((await value("Essay")) === text, `final text in the Essay tab differs: ${JSON.stringify(await value("Essay"))}`);
+    assert((await value("Other")) === "", `keys went into the other tab: ${JSON.stringify(await value("Other"))}`);
+  } finally {
+    await ui(`(__tw.has("btn-cancel") ? __tw.click("btn-cancel") : __tw.has("btn-stop") && __tw.click("btn-stop"), 1)`).catch(() => {});
+    killTree(p);
+  }
+}
+
+// ---------------------------------------------------------------- closing
+const appRunning = () => /typewriter\.exe/i.test(execFileSync("tasklist", ["/FI", "IMAGENAME eq typewriter.exe", "/NH"]).toString());
+async function newAppSession() {
+  if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
+  const v = await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": { application: APP } } } }, 60000);
+  sid = v.sessionId;
+  mainHandle = await wd("GET", `/session/${sid}/window`);
+  await until(() => js(`return !!document.querySelector('[data-testid="btn-start"]') && !document.getElementById("boot")`), 30000, "the UI");
+}
+
 // ---------------------------------------------------------------- run
 async function main() {
   assert(existsSync(APP), `App not found: ${APP}`);
@@ -578,6 +663,9 @@ async function main() {
     }
     shot("win-02-status-window");
     assert(/Stop/.test(h.text), `status window has no Stop control: ${JSON.stringify(h)}`);
+    await sleep(800);
+    console.log(`    main window minimized while the status window shows: ${ps("input.ps1", "iconic", "Typewriter")}`);
+    hudPixels("win-hud-waiting");
     // Nothing may be typed while Typewriter itself still has focus or before the countdown ends.
     await ui(`(__tw.has("btn-cancel") ? __tw.click("btn-cancel") : __tw.has("btn-stop") && __tw.click("btn-stop"), 1)`);
     await until(async () => ["stopped", "completed", "failed"].includes(await hudPhase()), 8000, "the session to end after Stop");
@@ -592,9 +680,11 @@ async function main() {
     await until(async () => (await hudPhase()) === "typing", 15000, "typing to begin");
     await until(async () => read("doc").length > 20, 15000, "characters to arrive in the target");
     shot("win-03-typing");
+    hudPixels("win-hud-typing");
     await until(async () => (await hudPhase()) === "completed", 90000, "the session to complete");
     await sleep(500);
     shot("win-04-completed");
+    hudPixels("win-hud-completed");
     const got = read("doc");
     assert(got === TRICKY, `final text differs.\n    want ${JSON.stringify(TRICKY)}\n    got  ${JSON.stringify(got)}`);
   });
@@ -615,6 +705,7 @@ async function main() {
     await sleep(1500);
     assert(read("doc") === atPause, "text kept arriving while paused");
     shot("win-05-paused");
+    hudPixels("win-hud-paused");
     await hudClick("hud-resume");
     await sleep(500);
     await clickInto("doc");
@@ -636,7 +727,7 @@ async function main() {
     shot("win-06-focus-pause");
     await sleep(1200);
     assert(read("other") === "", `keys went into the other window: ${JSON.stringify(read("other"))}`);
-    assert(/Focus moved|paused/i.test(h.detail), `pause reason not shown: ${JSON.stringify(h)}`);
+    assert(/Focus moved/i.test(h.detail), `pause reason not shown: ${JSON.stringify(h)}`);
     await hudClick("hud-stop");
     await until(async () => (await hudPhase()) === "stopped", 5000, "stopped");
   });
@@ -683,6 +774,41 @@ async function main() {
   } else {
     console.log(`  - the Chrome extension in Opera: skipped (${opera ? "dist-extension not built" : "Opera isn't installed"})`);
   }
+
+  const tabBrowser = BROWSERS.filter(([n]) => n === "Opera" || n === "Chrome").map(([n, paths]) => [n, paths.find((x) => existsSync(x))]).find(([, exe]) => exe);
+  if (tabBrowser) {
+    await check(`switching tabs in ${tabBrowser[0]} mid-session: nothing goes into the other tab, typing waits, then continues by itself`, () => tabSwitchCheck(tabBrowser[0], tabBrowser[1], port++));
+  } else {
+    console.log("  - switching browser tabs: skipped, neither Opera nor Chrome is installed");
+  }
+
+  await check("closing Typewriter while it's minimized (as from the taskbar) brings it back with the question; Quit ends it", async () => {
+    await ensureIdle();
+    await ui(`(__tw.setText("Unsaved words."), 1)`);
+    await sleep(400);
+    ps("input.ps1", "minimize", "Typewriter");
+    await until(async () => ps("input.ps1", "iconic", "Typewriter") === "True", 5000, "Typewriter to be minimized");
+    ps("input.ps1", "sysclose", "Typewriter");
+    await until(() => ui(`!!document.querySelector('[data-testid="quit-dialog"]')?.open`), 5000, "the quit question");
+    await until(async () => ps("input.ps1", "iconic", "Typewriter") === "False", 5000, "Typewriter to come back from minimized, so the question can be seen");
+    await sleep(500);
+    shot("win-08-quit-from-minimized");
+    await ui(`(__tw.click("quit-confirm"), 1)`).catch(() => {}); // the window goes away mid-call
+    await until(async () => !appRunning(), 15000, "typewriter.exe to exit after Quit");
+  });
+
+  await check("a page that doesn't answer can't keep Typewriter open: closing still ends it", async () => {
+    await newAppSession();
+    await ui(`(__tw.setText("Unsaved words."), 1)`);
+    await sleep(400);
+    // Hang the page's JavaScript for good, as a blank or frozen window would be.
+    await js(`setTimeout(() => { for (;;) {} }, 50); return 1;`);
+    await sleep(600);
+    const t0 = Date.now();
+    ps("input.ps1", "sysclose", "Typewriter");
+    await until(async () => !appRunning(), 20000, "typewriter.exe to exit although its page is hung");
+    console.log(`    exited ${((Date.now() - t0) / 1000).toFixed(1)} s after the close request`);
+  });
 
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
 }

@@ -36,6 +36,9 @@ export function QuitGuard({ session }: { session: Session }) {
     void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
       getCurrentWindow()
         .onCloseRequested((e) => {
+          // Tell the app this page is alive; otherwise it closes the window anyway after a
+          // few seconds (a blank or hung page must never make Typewriter impossible to close).
+          void import("@tauri-apps/api/core").then(({ invoke }) => invoke("close_answered")).catch(() => {});
           const s = latest.current;
           const r = quitRisk(s.text, s.prefs.rememberText, s.snapshot.status);
           if (!r) return; // nothing to lose: close normally

@@ -19,6 +19,8 @@ struct State {
     focused: Option<WindowInfo>,
     sensitive: Option<String>,
     modifiers: bool,
+    /// The modifier names the platform reports as held (empty when it can't tell).
+    held: Vec<&'static str>,
     failsafe: bool,
     fields: HashMap<String, VirtualField>,
     keys_sent: usize,
@@ -69,6 +71,9 @@ impl Desktop for Fake {
     fn modifiers_held(&mut self) -> bool {
         self.0.lock().unwrap().modifiers
     }
+    fn held_modifiers(&mut self) -> Vec<&'static str> {
+        self.0.lock().unwrap().held.clone()
+    }
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
     }
@@ -87,7 +92,8 @@ impl Desktop for Fake {
     }
     fn send(&mut self, a: &KeyAction) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
-        let id = s.focused.as_ref().map(|w| w.window_id.clone()).unwrap_or_else(|| "nowhere".into());
+        // A browser window has tabs: keys reach the tab that is showing.
+        let id = s.focused.as_ref().map(|w| if w.is_browser() { format!("{}#{}", w.window_id, w.tab_key()) } else { w.window_id.clone() }).unwrap_or_else(|| "nowhere".into());
         s.keys_sent += 1;
         s.first_key_at.get_or_insert(Instant::now());
         s.fields.entry(id).or_default().apply(a);
@@ -245,7 +251,7 @@ fn a_pause_for_an_untitled_window_names_its_app() {
     fake.focus(WindowInfo { window_id: "popup".into(), process_id: 77, app_name: "Google Chrome".into(), title: "".into() });
     assert!(wait_for_phase(&r, "paused", 1000));
     let msg = r.updates.lock().unwrap().iter().rev().find(|u| u.phase == "paused").unwrap().message.clone().unwrap_or_default();
-    assert_eq!(msg, "Focus moved to \"Google Chrome\", so typing paused.");
+    assert_eq!(msg, "Focus moved to \"Google Chrome\", so typing is waiting. Click back into your document and it continues by itself.");
     r.control.send(Command::Stop);
     r.handle.join().unwrap();
 }
@@ -595,4 +601,144 @@ fn the_diagnostic_trail_records_each_step_but_never_the_text_or_titles() {
         assert!(!trail.contains(secret), "the trail contains {secret:?}:\n{trail}");
     }
     drop(control);
+}
+
+fn tab(title: &str) -> WindowInfo {
+    WindowInfo { window_id: "opera".into(), process_id: 50, app_name: "Opera Internet Browser".into(), title: format!("{title} - Opera") }
+}
+
+fn last_paused(r: &Run) -> Update {
+    r.updates.lock().unwrap().iter().rev().find(|u| u.phase == "paused").cloned().unwrap()
+}
+
+#[test]
+fn switching_browser_tabs_waits_and_continues_by_itself_in_the_original_tab() {
+    let fake = Fake::default();
+    let docs = tab("Untitled document - Google Docs");
+    fake.focus(docs.clone());
+    let text = "typed into the document tab only, never into the other tab. ".repeat(2);
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(200));
+    fake.focus(tab("YouTube"));
+    assert!(wait_for_phase(&r, "paused", 1000), "typing didn't wait when the tab changed");
+    let u = last_paused(&r);
+    assert_eq!(u.reason.as_deref(), Some("tab-changed"));
+    assert!(u.message.unwrap().contains("Go back to the tab \"Untitled document - Google Docs - Opera\""));
+    let k = fake.keys();
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(fake.keys(), k, "kept typing in another tab");
+    assert_eq!(fake.text("opera#YouTube - Opera"), "");
+    // No Resume needed: going back to the tab is enough.
+    fake.focus(docs);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("opera#Untitled document - Google Docs - Opera"), text);
+    assert_eq!(fake.text("opera#YouTube - Opera"), "");
+    assert!(phases(&r.updates).contains(&"resuming".to_string()), "no short countdown before continuing");
+}
+
+#[test]
+fn focus_moving_to_another_app_waits_and_continues_by_itself() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let text = "comes back by itself. ".repeat(4);
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(150));
+    fake.focus(win("chat", 77, "Chat app"));
+    assert!(wait_for_phase(&r, "paused", 1000));
+    assert_eq!(last_paused(&r).reason.as_deref(), Some("focus-changed"));
+    thread::sleep(Duration::from_millis(200));
+    fake.focus(win("doc", 42, "Doc"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), text);
+    assert_eq!(fake.text("chat"), "");
+}
+
+#[test]
+fn pressing_pause_while_waiting_for_the_window_needs_resume_to_continue() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let text = "the user's pause wins. ".repeat(4);
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(150));
+    fake.focus(win("hud", OWN, "Typewriter status"));
+    assert!(wait_for_phase(&r, "paused", 1000));
+    assert_eq!(last_paused(&r).reason.as_deref(), Some("focus-typewriter"));
+    r.control.send(Command::Pause);
+    let t0 = Instant::now();
+    while last_paused(&r).reason.as_deref() != Some("user") && t0.elapsed() < Duration::from_secs(1) {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(last_paused(&r).reason.as_deref(), Some("user"));
+    let k = fake.keys();
+    fake.focus(win("doc", 42, "Doc"));
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(fake.keys(), k, "continued without Resume after the user paused");
+    r.control.send(Command::Resume);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), text);
+}
+
+#[test]
+fn resume_pressed_in_another_tab_continues_in_that_tab() {
+    let fake = Fake::default();
+    fake.focus(tab("Draft"));
+    let text = "abcdefghijklmnopqrstuvwxyz".repeat(3);
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(120));
+    fake.focus(tab("Draft renamed"));
+    assert!(wait_for_phase(&r, "paused", 1000));
+    let before = fake.text("opera#Draft - Opera");
+    r.control.send(Command::Resume);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let after = fake.text("opera#Draft renamed - Opera");
+    assert_eq!(format!("{before}{after}"), text, "nothing lost or repeated across the tab change");
+}
+
+#[test]
+fn a_title_that_changes_while_typing_doesnt_pause_ordinary_apps() {
+    let fake = Fake::default();
+    fake.focus(win("np", 42, "Untitled - Notepad"));
+    let text = "notepad marks the title as unsaved".to_string();
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(80));
+    fake.focus(win("np", 42, "*Untitled - Notepad"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert!(!phases(&r.updates).contains(&"paused".to_string()));
+    assert_eq!(fake.text("np"), text);
+}
+
+#[test]
+fn a_page_marking_its_own_title_isnt_a_tab_change() {
+    let fake = Fake::default();
+    fake.focus(tab("Inbox"));
+    let text = "unread counts come and go".to_string();
+    let r = start(&fake, events_for(&text, 4.0), 20);
+    thread::sleep(Duration::from_millis(60));
+    fake.focus(tab("(3) Inbox"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert!(!phases(&r.updates).contains(&"paused".to_string()));
+}
+
+#[test]
+fn a_held_modifier_is_named_so_a_stuck_key_can_be_found() {
+    for (held, expect) in [(vec!["Ctrl"], "Waiting for you to release Ctrl. If you aren't holding it, press and release it once."), (vec![], "Waiting for you to release Ctrl, Alt, Shift or Cmd.")] {
+        let fake = Fake::default();
+        fake.focus(win("doc", 42, "Doc"));
+        {
+            let mut s = fake.0.lock().unwrap();
+            s.modifiers = true;
+            s.held = held;
+        }
+        let r = start(&fake, events_for("ok", 2.0), 10);
+        let t0 = Instant::now();
+        while !r.updates.lock().unwrap().iter().any(|u| u.reason.as_deref() == Some("modifiers-held")) && t0.elapsed() < Duration::from_secs(2) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let u = r.updates.lock().unwrap().iter().find(|u| u.reason.as_deref() == Some("modifiers-held")).cloned().unwrap();
+        assert_eq!(u.message.as_deref(), Some(expect));
+        assert_eq!(fake.keys(), 0);
+        fake.0.lock().unwrap().modifiers = false;
+        assert_eq!(r.handle.join().unwrap(), "completed");
+        assert_eq!(fake.text("doc"), "ok");
+    }
 }

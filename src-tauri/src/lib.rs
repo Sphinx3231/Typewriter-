@@ -105,7 +105,15 @@ struct AppState {
     workers: Mutex<Vec<std::thread::JoinHandle<String>>>,
     /// Set once the typing threads have been waited for, so the final exit can proceed.
     cleaned_up: std::sync::atomic::AtomicBool,
+    /// Close requests of the main window, and the latest one its page has answered.
+    close_requests: AtomicU64,
+    close_answered: AtomicU64,
 }
+
+/// How long the main window's page has to answer a close request (it may ask the user
+/// first) before the window is closed anyway: a page that doesn't answer is blank or
+/// hung, and the user must always be able to close Typewriter.
+const CLOSE_ANSWER_LIMIT: Duration = Duration::from_secs(3);
 
 /// Longest the app waits on exit for typing threads to stop and clean up (on X11,
 /// removing temporary key bindings takes up to a few seconds).
@@ -226,7 +234,7 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
                 // Close the status window unless a new session has started meanwhile.
                 if h.state::<AppState>().current.load(Ordering::SeqCst) == id {
                     if let Some(hud) = h.get_webview_window("hud") {
-                        let _ = hud.close();
+                        let _ = hud.destroy();
                     }
                 }
             });
@@ -293,6 +301,38 @@ fn show_main(app: AppHandle) {
     }
 }
 
+/// The main window's page calls this as soon as it receives a close request, before
+/// deciding whether to ask the user. It proves the page is alive.
+#[tauri::command]
+fn close_answered(app: AppHandle) {
+    let st = app.state::<AppState>();
+    st.close_answered.store(st.close_requests.load(Ordering::SeqCst), Ordering::SeqCst);
+}
+
+/// A close request for the main window: bring it to the front, so a "Quit Typewriter?"
+/// question is never hidden in a minimized window (Typewriter minimizes itself while
+/// typing, and closing from the taskbar doesn't restore it), and close it anyway when
+/// its page doesn't answer.
+fn main_close_requested(window: &tauri::Window) {
+    let app = window.app_handle().clone();
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let request = app.state::<AppState>().close_requests.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(CLOSE_ANSWER_LIMIT);
+        let st = app.state::<AppState>();
+        if st.close_answered.load(Ordering::SeqCst) < request {
+            if let Some(main) = app.get_webview_window("main") {
+                if let Some(path) = diag_path(&app) {
+                    diag_append(&path, &format!("\n=== {} UTC · the main window didn't answer a close request within {} s: closed anyway", utc_now(), CLOSE_ANSWER_LIMIT.as_secs()));
+                }
+                let _ = main.destroy();
+            }
+        }
+    });
+}
+
 fn show_hud(app: &AppHandle) {
     if let Some(hud) = app.get_webview_window("hud") {
         let _ = hud.show();
@@ -328,7 +368,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main, diagnostics, copy_diagnostics])
+        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main, close_answered, diagnostics, copy_diagnostics])
         .setup(|app| {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.
@@ -347,11 +387,16 @@ pub fn run() {
             // When the main window is really gone, end any typing session and the app.
             // (Not on CloseRequested: the window may ask the user first and stay open.)
             if window.label() == "main" {
-                if let tauri::WindowEvent::Destroyed = event {
-                    stop_session(window.app_handle());
-                    if let Some(hud) = window.app_handle().get_webview_window("hud") {
-                        let _ = hud.close();
+                match event {
+                    tauri::WindowEvent::CloseRequested { .. } => main_close_requested(window),
+                    tauri::WindowEvent::Destroyed => {
+                        stop_session(window.app_handle());
+                        // destroy, not close: the status window must go even if its page is blank or hung.
+                        if let Some(hud) = window.app_handle().get_webview_window("hud") {
+                            let _ = hud.destroy();
+                        }
                     }
+                    _ => {}
                 }
             }
         })
