@@ -118,7 +118,7 @@ describe("status window (HUD)", () => {
 
     f.push({ phase: "countdown", countdownMs: 2500 });
     expect(label()).toBe("Starting in 3");
-    expect(detail()).toBe("Keep the cursor where the text should go.");
+    expect(detail()).toBe("Keep the cursor where the text should go. A click starts the countdown again.");
     f.push({ phase: "countdown", countdownMs: 0 });
     expect(label()).toBe("Starting in 1"); // never "0"
 

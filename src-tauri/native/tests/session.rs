@@ -21,6 +21,8 @@ struct State {
     modifiers: bool,
     /// The modifier names the platform reports as held (empty when it can't tell).
     held: Vec<&'static str>,
+    /// A mouse button is held down.
+    mouse: bool,
     failsafe: bool,
     fields: HashMap<String, VirtualField>,
     keys_sent: usize,
@@ -73,6 +75,9 @@ impl Desktop for Fake {
     }
     fn held_modifiers(&mut self) -> Vec<&'static str> {
         self.0.lock().unwrap().held.clone()
+    }
+    fn mouse_down(&mut self) -> bool {
+        self.0.lock().unwrap().mouse
     }
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
@@ -623,7 +628,7 @@ fn switching_browser_tabs_waits_and_continues_by_itself_in_the_original_tab() {
     assert!(wait_for_phase(&r, "paused", 1000), "typing didn't wait when the tab changed");
     let u = last_paused(&r);
     assert_eq!(u.reason.as_deref(), Some("tab-changed"));
-    assert!(u.message.unwrap().contains("Go back to the tab \"Untitled document - Google Docs - Opera\""));
+    assert_eq!(u.message.as_deref(), Some("You switched tabs, so typing is waiting. Go back to the tab you started in and it continues by itself."));
     let k = fake.keys();
     thread::sleep(Duration::from_millis(300));
     assert_eq!(fake.keys(), k, "kept typing in another tab");
@@ -741,4 +746,57 @@ fn a_held_modifier_is_named_so_a_stuck_key_can_be_found() {
         assert_eq!(r.handle.join().unwrap(), "completed");
         assert_eq!(fake.text("doc"), "ok");
     }
+}
+
+impl Fake {
+    /// A real click: the button goes down, then up 40 ms later.
+    fn click(&self) {
+        self.0.lock().unwrap().mouse = true;
+        thread::sleep(Duration::from_millis(40));
+        self.0.lock().unwrap().mouse = false;
+    }
+}
+
+#[test]
+fn a_click_during_the_countdown_starts_it_again_so_typing_begins_after_the_click() {
+    // Typewriter minimizes itself on Start and the system focuses the window behind it at once:
+    // the countdown starts before the user has clicked into the document.
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let r = start(&fake, events_for("abc", 2.0), 400);
+    thread::sleep(Duration::from_millis(300));
+    let clicked_at = Instant::now();
+    fake.click();
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let first = fake.0.lock().unwrap().first_key_at.unwrap();
+    let after_click = first.duration_since(clicked_at);
+    assert!(after_click >= Duration::from_millis(390), "typing began {after_click:?} after the click, before a full countdown");
+    assert_eq!(fake.text("doc"), "abc");
+}
+
+#[test]
+fn switching_to_another_window_during_the_countdown_starts_it_again_for_that_window() {
+    let fake = Fake::default();
+    fake.focus(win("behind", 7, "Whatever was behind Typewriter"));
+    let r = start(&fake, events_for("abc", 2.0), 400);
+    thread::sleep(Duration::from_millis(300));
+    let switched_at = Instant::now();
+    fake.focus(win("doc", 42, "Doc"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let first = fake.0.lock().unwrap().first_key_at.unwrap();
+    assert!(first.duration_since(switched_at) >= Duration::from_millis(390), "typing began before a full countdown in the new window");
+    assert_eq!(fake.text("doc"), "abc");
+    assert_eq!(fake.text("behind"), "");
+}
+
+#[test]
+fn a_button_already_held_when_the_countdown_starts_isnt_a_click() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    fake.0.lock().unwrap().mouse = true; // e.g. still dragging
+    let t0 = Instant::now();
+    let r = start(&fake, events_for("ab", 2.0), 200);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert!(t0.elapsed() < Duration::from_millis(1500), "the countdown kept restarting while a button was held");
+    assert_eq!(fake.text("doc"), "ab");
 }

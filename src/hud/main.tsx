@@ -34,7 +34,7 @@ function detail(u: NativeUpdate | null): string {
     case "waiting":
       return "Typing starts after the countdown. Nothing is typed yet.";
     case "countdown":
-      return "Keep the cursor where the text should go.";
+      return "Keep the cursor where the text should go. A click starts the countdown again.";
     case "typing":
       return u.message ?? (u.target ? `Into “${u.target.title}”` : "");
     case "completed":

@@ -6,7 +6,8 @@
 //!              are bound as they are typed; Stop ends it at once
 //!   waiting  – Typewriter still has focus; nothing is typed until the user switches away.
 //!              Bounded by `wait_timeout_ms` (then the session fails and says why)
-//!   countdown – visible countdown; switching back to Typewriter returns to `waiting`
+//!   countdown – visible countdown; switching back to Typewriter returns to `waiting`; a click
+//!              or a switch to another window starts it again
 //!   typing   – keys are sent on the timeline into the window that had focus when the
 //!              countdown ended (the "target")
 //!   paused   – by the user, or automatically when focus leaves the target, a password
@@ -287,6 +288,12 @@ impl<D: Desktop> Session<D> {
         let waiting_since = Instant::now();
         let mut unknown_since: Option<Instant> = None;
         let mut last_seen: Option<Option<(u64, String)>> = None;
+        // The window the countdown is running for, and the mouse button's last state: a click
+        // or a switch to another window restarts the countdown. When Typewriter minimizes itself,
+        // the system hands focus to whatever window was behind it, which starts the countdown
+        // before the user has clicked into the document; the click must count, not that.
+        let mut counting_for: Option<(u64, String)> = None;
+        let mut was_down = self.desktop.mouse_down();
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
@@ -319,7 +326,7 @@ impl<D: Desktop> Session<D> {
                     None => "focus: the focused window can't be read".into(),
                 };
                 self.log(line);
-                last_seen = Some(seen);
+                last_seen = Some(seen.clone());
             }
             if focused.is_some() {
                 unknown_since = None;
@@ -327,6 +334,9 @@ impl<D: Desktop> Session<D> {
                 unknown_since = Some(Instant::now());
             }
             let away = focused.map(|w| !self.is_own(&w)).unwrap_or(false);
+            let down = self.desktop.mouse_down();
+            let clicked = down && !was_down;
+            was_down = down;
             match (away, countdown_started) {
                 (false, _) => {
                     let restarted = countdown_started.take().is_some();
@@ -348,6 +358,15 @@ impl<D: Desktop> Session<D> {
                 (true, None) => {
                     self.log("countdown started");
                     countdown_started = Some(Instant::now());
+                    counting_for = seen;
+                }
+                (true, Some(_)) if clicked || seen != counting_for => {
+                    let why = if seen != counting_for { "another window got focus" } else { "a click" };
+                    self.log(format!("countdown restarted: {why}"));
+                    countdown_started = Some(Instant::now());
+                    counting_for = seen;
+                    self.update("countdown", self.cfg.countdown_ms as f64, None, None);
+                    last_emit = Instant::now();
                 }
                 (true, Some(t0)) => {
                     let left = self.cfg.countdown_ms as f64 - t0.elapsed().as_secs_f64() * 1000.0;
@@ -392,7 +411,7 @@ impl<D: Desktop> Session<D> {
             None => return Some(("focus-unknown", format!("Lost track of the focused window, so typing is waiting. {BACK}"))),
             Some(w) if self.is_own(&w) => return Some(("focus-typewriter", format!("Typewriter has focus, so typing is waiting (it never types into itself). {BACK}"))),
             Some(w) if w.other_tab_of(&target) => {
-                return Some(("tab-changed", format!("You switched to another tab, so typing is waiting. Go back to the tab \"{}\" and it continues by itself.", target.title)));
+                return Some(("tab-changed", "You switched tabs, so typing is waiting. Go back to the tab you started in and it continues by itself.".into()));
             }
             Some(w) if !w.same_window(&target) => {
                 // Some windows (pop-ups, overlays) have no title: name the app instead.

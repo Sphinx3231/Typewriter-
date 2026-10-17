@@ -592,7 +592,7 @@ async function tabSwitchCheck(name, exe, port) {
       return v?.phase === "paused" ? v : null;
     }, 5000, "typing to wait after the tab switch");
     console.log(`    after Ctrl+Tab the status window says: ${JSON.stringify(h.label)} ${JSON.stringify(h.detail)}`);
-    assert(/another tab/i.test(h.detail), `the wait isn't explained: ${JSON.stringify(h)}`);
+    assert(/switched tabs/i.test(h.detail), `the wait isn't explained: ${JSON.stringify(h)}`);
     hudPixels(`win-hud-tab-${name.toLowerCase()}`);
     await sleep(500);
     const atSwitch = await value("Essay");

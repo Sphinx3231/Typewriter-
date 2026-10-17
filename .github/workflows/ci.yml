@@ -16,7 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      - run: npm run test:coverage   # unit tests; fails below 95% lines, statements, functions or branches
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

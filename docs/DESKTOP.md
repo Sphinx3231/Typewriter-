@@ -52,7 +52,7 @@ The build is reproducible from the lockfiles (`package-lock.json`, `src-tauri/Ca
 3. Under **Session settings › Output**, choose **Into another app**. The panel says whether typing is available on this computer and, if not, why.
 4. Press **Type into app**. Typewriter minimises itself (you can turn this off), and a small **status window** stays on top. It first says **Getting ready** while the keyboard is prepared (usually well under a second; a text with many symbols that aren't on your keyboard takes longer on Linux, and the window counts them).
 5. Click into your document **exactly where the text should start**.
-6. A countdown runs (5 seconds by default; you can set 2–30). When it ends, Typewriter types into the window you clicked into.
+6. A countdown runs (5 seconds by default; you can set 2–30). It starts again whenever you click or switch to another window, so it always runs in full after your last click. When it ends, Typewriter types into the window you clicked into.
 
 ### If typing doesn't start
 
@@ -82,7 +82,7 @@ The status window shows:
 - the target window, percent done and time left;
 - **Pause**, **Resume** and **Stop** buttons.
 
-Clicking it is always safe. The click moves focus away from your document, so typing pauses first.
+Clicking it is always safe. The click moves focus away from your document, so typing waits first.
 
 If the emergency shortcut couldn't be registered (another app may own it), the window says so instead of showing a shortcut that doesn't work.
 
@@ -94,9 +94,9 @@ If the emergency shortcut couldn't be registered (another app may own it), the w
 
 ### Safety rules
 
-- **Nothing types before the countdown ends.** The countdown starts only once Typewriter itself no longer has focus. If you come back to Typewriter, it starts over.
+- **Nothing types before the countdown ends.** The countdown starts only once Typewriter itself no longer has focus, and starts over after every click and every switch to another window. (When Typewriter minimises itself, the system focuses whatever window was behind it; the countdown doesn't run out before you've clicked into your document.) If you come back to Typewriter, it waits again.
 - **It never types into Typewriter itself.**
-- **Clicking another window pauses typing.** After **Resume**, it waits until that same window has focus again before typing anything.
+- **Switching windows or browser tabs makes typing wait.** Nothing goes into the other window or tab. When the window and tab you started in have focus again, a short countdown runs and typing continues by itself. Pressing **Pause** meanwhile makes it your pause: then only **Resume** continues. Pressing **Resume** while another tab of the same browser window shows continues in that tab. Browser tabs are told apart by the window title (unread counts like "(3)" are ignored).
 - **Password fields and login windows are refused:**
   - Windows: password boxes are detected through UI Automation.
   - macOS: secure input mode is detected.
@@ -104,6 +104,7 @@ If the emergency shortcut couldn't be registered (another app may own it), the w
 - **Shortcuts can't fire by accident.** If you hold Ctrl, Alt, Shift or Cmd, it waits until you let go.
 - **Your text is only ever typed as literal characters.** It is never run, and never sent anywhere.
 - **Your text isn't lost when you quit.** If the text isn't saved ("Remember my text" is off), or a session is running, closing the window asks first. You can keep Typewriter open, save the text and quit, or quit anyway. Clicking Typewriter to close it already pauses typing (focus left your document); quitting then ends the session and removes Typewriter's temporary key bindings before the app exits.
+- **Closing always works.** Closing Typewriter while it's minimised (for example from the taskbar) brings it back so you can see the question. If the window doesn't answer within 3 seconds (blank or frozen), it closes anyway, and the status window closes with it.
 
 ### Checking the result
 

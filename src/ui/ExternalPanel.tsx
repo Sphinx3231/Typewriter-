@@ -68,7 +68,7 @@ export function ExternalStatus({ session }: { session: Session }) {
         <MousePointerClick size={15} aria-hidden="true" />{" "}
         {inChrome
           ? ext.message ?? "Switch to the tab you want to type into."
-          : ext.message ?? "Switch to your document and click exactly where the text should start. The countdown begins when Typewriter loses focus."}{" "}
+          : ext.message ?? "Switch to your document and click exactly where the text should start. The countdown starts from your click."}{" "}
         Nothing is typed yet.
       </p>
     );
@@ -76,7 +76,7 @@ export function ExternalStatus({ session }: { session: Session }) {
     body = (
       <p className="ext-status__countdown" data-testid="ext-countdown">
         <Timer size={15} aria-hidden="true" /> Typing starts in <strong>{Math.max(1, Math.ceil(ext.countdownMs / 1000))}</strong>.{" "}
-        {inChrome ? "Click in the page exactly where the text should start." : "Keep the cursor where you want the text."}
+        {inChrome ? "Click in the page exactly where the text should start." : "Keep the cursor where you want the text. A click starts the countdown again."}
       </p>
     );
   else if (ext.phase === "typing")

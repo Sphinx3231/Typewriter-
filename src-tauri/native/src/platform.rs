@@ -80,6 +80,11 @@ pub trait Desktop {
     fn modifiers_held(&mut self) -> bool;
     /// True when the mouse is in the top-left corner (emergency stop).
     fn failsafe_triggered(&mut self) -> bool;
+    /// True while a mouse button (left or right) is held down. A click during the countdown
+    /// restarts it, so typing begins a full countdown after the user clicks into the document.
+    fn mouse_down(&mut self) -> bool {
+        false
+    }
     /// Send one key action to the focused window.
     fn send(&mut self, action: &KeyAction) -> Result<(), String>;
     /// Called once with every character the session will type, before the
@@ -294,6 +299,17 @@ impl Desktop for RealDesktop {
         matches!(self.enigo.as_ref().map(|e| e.location()), Some(Ok((x, y))) if x <= 1 && y <= 1)
     }
 
+    fn mouse_down(&mut self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.x11.as_ref().and_then(|x| x.pointer()).map(|p| p.button).unwrap_or(false)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            os::mouse_down()
+        }
+    }
+
     fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool, progress: &mut dyn FnMut(usize, usize)) {
         #[cfg(target_os = "linux")]
         if let Some(t) = self.typer.as_mut() {
@@ -354,7 +370,7 @@ mod os {
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
     use windows::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel, TOKEN_MANDATORY_LABEL, TOKEN_QUERY};
     use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_RBUTTON, VK_RWIN, VK_SHIFT};
     use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsHungAppWindow, GUITHREADINFO};
 
     /// Uses UI Automation to ask whether the focused control is a password box.
@@ -372,6 +388,11 @@ mod os {
 
     pub fn modifiers_held() -> bool {
         unsafe { [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| (GetAsyncKeyState(k.0 as i32) as u16 & 0x8000) != 0) }
+    }
+
+    /// The physical left or right mouse button is down.
+    pub fn mouse_down() -> bool {
+        unsafe { [VK_LBUTTON, VK_RBUTTON].iter().any(|k| (GetAsyncKeyState(k.0 as i32) as u16 & 0x8000) != 0) }
     }
 
     pub fn held_modifiers() -> Vec<&'static str> {
@@ -456,6 +477,12 @@ mod os {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGEventSourceFlagsState(state_id: i32) -> u64;
+        fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
+    }
+
+    /// The left or right mouse button is down (combined session state).
+    pub fn mouse_down() -> bool {
+        unsafe { CGEventSourceButtonState(0, 0) || CGEventSourceButtonState(0, 1) }
     }
 
     /// macOS turns on Secure Event Input while a password field has focus.
@@ -491,6 +518,7 @@ mod linux {
         pub x: i16,
         pub y: i16,
         pub modifiers: bool,
+        pub button: bool,
     }
 
     /// One persistent X11 connection for focus, pointer and modifier queries.
@@ -538,7 +566,12 @@ mod linux {
                 .filter(|t| !t.is_empty())
                 .or_else(|| self.window_prop(w, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into(), 1024).map(|r| String::from_utf8_lossy(&r.value).into_owned()))
                 .unwrap_or_default();
-            Some(WindowInfo { window_id: w.to_string(), process_id: pid as u64, app_name: String::new(), title })
+            // WM_CLASS is "instance\0class\0"; the class names the app (e.g. "Google-chrome", "firefox").
+            let app_name = self
+                .window_prop(w, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into(), 256)
+                .map(|r| r.value.split(|b| *b == 0).filter(|p| !p.is_empty()).last().map(|c| String::from_utf8_lossy(c).into_owned()).unwrap_or_default())
+                .unwrap_or_default();
+            Some(WindowInfo { window_id: w.to_string(), process_id: pid as u64, app_name, title })
         }
 
         pub fn pointer(&self) -> Option<Pointer> {
@@ -553,6 +586,7 @@ mod linux {
                 x: r.root_x,
                 y: r.root_y,
                 modifiers: m.contains(KeyButMask::SHIFT) || m.contains(KeyButMask::CONTROL) || m.contains(KeyButMask::MOD1) || m.contains(KeyButMask::MOD4),
+                button: m.contains(KeyButMask::BUTTON1) || m.contains(KeyButMask::BUTTON3),
             };
             self.pointer.set(Some((Instant::now(), p)));
             Some(p)
