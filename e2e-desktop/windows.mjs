@@ -69,6 +69,7 @@ async function check(name, fn) {
   } catch (e) {
     failures++;
     console.log(`  ✘ ${name}\n    ${String(e?.message ?? e).split("\n").join("\n    ")}`);
+    shot(`win-failed-${failures}`);
   }
 }
 

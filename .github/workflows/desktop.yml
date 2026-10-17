@@ -58,8 +58,10 @@ jobs:
 
   # The real app on a real Windows desktop: typing into a native Windows text box with
   # real key events, the status window, pause/resume, focus loss and the emergency stop.
+  # Windows Server 2022: on the 2025 image (windows-latest) Microsoft Edge WebDriver can't
+  # start any WebView2 app (actions/runner-images#14738), so no session is ever created.
   windows-e2e:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
