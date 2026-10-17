@@ -303,6 +303,9 @@ async function main() {
     await until(async () => read("doc").length > 15, 20000, "typing to begin");
     await hudClick("hud-pause");
     await until(async () => (await hudPhase()) === "paused", 5000, "paused");
+    // The target saves its text every 150 ms, and a key sent just before the pause may still be in
+    // Windows' input queue: let both settle, then nothing more may arrive while paused.
+    await sleep(500);
     const atPause = read("doc");
     await sleep(1500);
     assert(read("doc") === atPause, "text kept arriving while paused");
