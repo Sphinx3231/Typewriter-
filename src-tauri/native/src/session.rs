@@ -289,6 +289,9 @@ impl<D: Desktop> Session<D> {
     /// Checks that typing may continue right now. Returns a pause reason if not.
     fn guard(&mut self) -> Option<(&'static str, String)> {
         let target = self.target.clone()?;
+        // The password-field check can be slow (it asks the focused app); run it first, so the
+        // focused window is read last, right before the key is sent.
+        let sensitive = self.desktop.sensitive_focus();
         let mut focused = self.desktop.focused_window();
         if focused.is_none() {
             // Often a momentary blip while windows change; give it a moment to settle
@@ -312,10 +315,7 @@ impl<D: Desktop> Session<D> {
                 }
             }
         }
-        if let Some(why) = self.desktop.sensitive_focus() {
-            return Some(("sensitive", why));
-        }
-        None
+        sensitive.map(|why| ("sensitive", why))
     }
 
     fn type_all(&mut self) -> String {

@@ -32,7 +32,7 @@ Two bugs reported from real use. Both had a root cause in the code; neither was 
 | Extension | `npm run test:extension` | **30 passed** (incl. the release build typing with nothing pre-granted) |
 | Extension, real browser UI | Chromium 141 on Xvfb, real toolbar clicks (xdotool), shipped `dist-extension` | side panel full UI on a fresh load and after a full restart; typed exactly into a page; Verified |
 | Windows end-to-end | `node e2e-desktop/windows.mjs` on GitHub `windows-2022` (Desktop builds workflow) | old app (run 12): **frozen**; fixed app (run 16, `bd403ed`): **6 passed** |
-| Builds | Desktop builds run 16 | Linux, Windows, macOS installers and native tests: **success** |
+| Builds | Desktop builds run 17 (`25ae580`, version 1.1.1) | Linux, Windows, macOS installers and native tests: **success**. (Run 16's macOS job failed: a native test caught a key sent to a window that took focus during the password-field check; fixed by reading focus last, with a regression test.) |
 
 The Windows harness runs the real `typewriter.exe` through tauri-driver and plays the user with real `SendInput` clicks and shortcut presses; the target is a native WinForms text box. Screenshots are in the run's `windows-e2e-screenshots` artifact.
 

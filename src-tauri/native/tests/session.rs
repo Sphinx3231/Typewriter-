@@ -28,6 +28,9 @@ struct State {
     slow_prepare: bool,
     /// While set, the focused window can't be determined (focused_window() returns None).
     focus_unknown: bool,
+    /// Moves focus to this window during the next password-field check after 3 keys (the
+    /// user clicks elsewhere while that check, which can be slow, is running).
+    focus_moves_during_check: Option<WindowInfo>,
 }
 
 #[derive(Clone, Default)]
@@ -55,7 +58,13 @@ impl Desktop for Fake {
         }
     }
     fn sensitive_focus(&mut self) -> Option<String> {
-        self.0.lock().unwrap().sensitive.clone()
+        let mut s = self.0.lock().unwrap();
+        if s.keys_sent >= 3 {
+            if let Some(w) = s.focus_moves_during_check.take() {
+                s.focused = Some(w);
+            }
+        }
+        s.sensitive.clone()
     }
     fn modifiers_held(&mut self) -> bool {
         self.0.lock().unwrap().modifiers
@@ -212,6 +221,19 @@ fn returning_to_typewriter_during_countdown_restarts_it() {
     let first = fake.0.lock().unwrap().first_key_at.unwrap();
     assert!(first.duration_since(back) >= Duration::from_millis(990), "the countdown didn't start over");
     assert_eq!(fake.text("doc"), "abc");
+}
+
+#[test]
+fn focus_moving_during_the_password_check_sends_nothing_to_the_new_window() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    fake.0.lock().unwrap().focus_moves_during_check = Some(win("chat", 77, "Chat app"));
+    let r = start(&fake, events_for("abcdefgh", 2.0), 20);
+    assert!(wait_for_phase(&r, "paused", 2000), "typing didn't pause when focus moved");
+    assert_eq!(fake.text("chat"), "", "a key went into the window that took focus");
+    assert_eq!(fake.text("doc"), "abc");
+    r.control.send(Command::Stop);
+    r.handle.join().unwrap();
 }
 
 #[test]
