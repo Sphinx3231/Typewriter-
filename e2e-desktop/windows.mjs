@@ -275,7 +275,9 @@ async function cdpEval(port, urlPart, expression) {
       };
       ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true } }));
     });
-    if (res.result?.exceptionDetails) throw new Error(res.result.exceptionDetails.text);
+    const ex = res.result?.exceptionDetails;
+    if (ex) throw new Error(ex.exception?.description ?? ex.text);
+    if (res.error) throw new Error(res.error.message);
     return res.result?.result?.value;
   } finally {
     ws.close();
@@ -364,7 +366,12 @@ async function operaExtensionCheck(exe, ext, port) {
       return list.find((x) => x.type === "service_worker" && x.url.startsWith("chrome-extension://") && x.url.endsWith("/background.js"));
     }, 30000, "Typewriter's service worker in Opera (the unpacked extension didn't load)");
     const id = new URL(sw.url).host;
-    const apis = await cdpEval(port, sw.url, `JSON.stringify({ sidePanel: typeof chrome.sidePanel, debugger: typeof chrome.debugger, opr: typeof opr, sidebarAction: typeof (globalThis.opr && opr.sidebarAction), ua: navigator.userAgent })`);
+    const apis = await cdpEval(
+      port,
+      sw.url,
+      `(() => { const c = globalThis.chrome || {}, o = globalThis.opr || {};
+        return JSON.stringify({ sidePanel: typeof c.sidePanel, debugger: typeof c.debugger, sidebarAction: typeof o.sidebarAction, ua: navigator.userAgent }); })()`,
+    );
     console.log(`    Opera extension APIs: ${apis}`);
     // Open the panel page in a tab, the way a side panel would load it.
     await fetch(`http://127.0.0.1:${port}/json/new?chrome-extension://${id}/index.html`, { method: "PUT", signal: AbortSignal.timeout(5000) });
