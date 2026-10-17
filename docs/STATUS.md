@@ -14,7 +14,7 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 ## What works (verified by running it)
 
 **Desktop app 1.1.0** (Tauri 2, Linux X11 verified):
-- **Installers** (built from `654dbd8`; checksums in [`RELEASE-1.1.0.md`](RELEASE-1.1.0.md)):
+- **Installers** (built from `ba653df`; checksums in [`RELEASE-1.1.0.md`](RELEASE-1.1.0.md)):
   - `.deb`: installed and tested;
   - `.AppImage`: launched and tested;
   - `.rpm`: verified and its binary tested on Debian, but not installed on an RPM system;
@@ -54,16 +54,16 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 |---|---|---|---|
 | Typecheck | `npm run lint` | clean | the whole TypeScript codebase |
 | Unit, fuzz, integrity, contrast | `npm test` | **214 passed** | Engine over thousands of seeds; the 14 × 4 × 5 exact-text matrix (typed buffer and sent keys); external adapter; quit-risk rules; 110 WCAG contrast pairs and palette checks; extension session logic |
-| Web UI | `npm run build && npm run test:e2e` | **27 passed** | Every in-app control in Chromium, themes, persistence, layout at 6 widths, chaos clicking |
-| Native | `npm run test:native` | **21 passed** | Session logic on a simulated desktop; key translation; 96 engine timelines; prepare-before-typing; Wayland/no-display refusal |
+| Web UI | `npm run build && npm run test:e2e` | **27 passed** (locally on `654dbd8`; CI on every push) | Every in-app control in Chromium, themes, persistence, layout at 6 widths, chaos clicking |
+| Native | `npm run test:native` | **22 passed** | Session logic on a simulated desktop; key translation; 96 engine timelines; prepare-before-typing, and Stop during preparation; Wayland/no-display refusal |
 | Desktop end-to-end | `npx tauri build --no-bundle && npm run test:desktop` | **20 passed** | The real app on X11, typing into real Chromium (list in DESKTOP.md) |
-| Desktop end-to-end, installed | `node e2e-desktop/run.mjs /usr/bin/typewriter` | **20 passed** | The same 20 checks against the installed `.deb` |
-| AppImage | `APPIMAGE_EXTRACT_AND_RUN=1 ONLY="starts without\|types tricky text\|emergency stop\|back-to-back" node e2e-desktop/run.mjs <AppImage>` | **4 passed** | Launch, exact typing, emergency stop, back-to-back sessions |
-| RPM | `rpm -K`, `rpm -i --nodeps` into a scratch root, `rpm -V`, then 3 desktop checks on its binary | **OK, 3 passed** | Package integrity and binary; not dependency resolution on Fedora |
-| Real Wayland | `npm run test:desktop:wayland` | **3 passed** | Installed app under Weston 13 + XWayland: refusal message, Start disabled, exact preview |
-| GitHub CI | runs 38996960262 (CI) and 38996967288 (Desktop builds) for `654dbd8` | **all jobs success** | Lint, unit, web, native, extension; Linux, Windows and macOS installers and session tests |
+| Desktop end-to-end, installed | `node e2e-desktop/run.mjs /usr/bin/typewriter` | **20 passed** | The same 20 checks against the installed `.deb`, including quitting mid-session: the process exits and no temporary key binding is left |
+| AppImage | `APPIMAGE_EXTRACT_AND_RUN=1 ONLY="starts without\|types tricky text\|emergency stop\|back-to-back\|quitting mid-session" node e2e-desktop/run.mjs <AppImage>` | **5 passed** | Launch, exact typing, emergency stop, back-to-back sessions, quitting mid-session |
+| RPM | `rpm -K`, `rpm -i --nodeps` into a scratch root, `rpm -V`, then 4 desktop checks on its binary | **OK, 4 passed** | Package integrity and binary; not dependency resolution on Fedora |
+| Real Wayland | `npm run test:desktop:wayland` | **4 passed** | Installed app under Weston 13 + XWayland: GTK on Wayland (no X11 window), refusal message, Start disabled, native refusal of a direct start call, exact preview |
+| GitHub CI | runs 39021580578 (CI) and 39021585270 (Desktop builds) for `81548d2` (app = `ba653df`) | **all jobs success** | Lint, unit, web, native, extension; Linux, Windows and macOS installers and session tests. The earlier macOS failure on `ba653df` was a test-timing defect, now fixed (see RELEASE-1.1.0.md) |
 | Packaging | `npm run desktop:build` | `.deb` 3.3 MB, `.rpm` 3.3 MB, `.AppImage` 79 MB | |
-| Chrome extension (deferred) | `npm run test:extension` | **28 passed** | Unchanged behaviour; shared UI regression |
+| Chrome extension (deferred) | `npm run test:extension` | **28 passed** (locally on `654dbd8`; CI on every push) | Unchanged behaviour; shared UI regression |
 
 ## Not verified
 
