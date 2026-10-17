@@ -32,6 +32,13 @@ const IDLE: ExternalInfo = {
   shortcutRegistered: true,
 };
 
+/**
+ * If the typing engine is still "preparing" this long after Start (it should answer at once,
+ * and fails by itself after 15 s), the session is ended here with an explanation instead of
+ * waiting forever.
+ */
+export const START_LIMIT_MS = 20_000;
+
 export interface ExternalOptions {
   countdownMs: number;
   minimize: boolean;
@@ -54,6 +61,11 @@ export class ExternalController implements PlaybackDriver {
   private snapshot: PlaybackSnapshot;
   private options: ExternalOptions = { countdownMs: 5000, minimize: true };
   private session = 0;
+  /** Start was pressed and the native side hasn't confirmed it yet. */
+  private starting = false;
+  /** Stop was pressed while starting: stop the native session as soon as it exists. */
+  private stopWhenStarted = false;
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private bridge: Bridge,
@@ -113,17 +125,28 @@ export class ExternalController implements PlaybackDriver {
     this.resetMirror();
     const session = ++this.session;
     this.status = "playing";
-    this.info = { ...IDLE, phase: "waiting", countdownMs: this.options.countdownMs };
+    this.starting = true;
+    this.stopWhenStarted = false;
+    this.info = { ...IDLE, phase: "preparing", countdownMs: this.options.countdownMs, message: "Getting the keyboard ready…" };
     this.emit();
+    this.armWatchdog(session);
     this.bridge
       .start(this.timeline.events, this.options.countdownMs, this.options.minimize, this.source)
       .then((r) => {
         if (session !== this.session) return;
+        this.starting = false;
+        if (this.stopWhenStarted) {
+          void this.bridge.control("stop").catch(() => {});
+          return;
+        }
         this.info = { ...this.info, shortcutRegistered: r.shortcutRegistered };
         this.emit();
       })
       .catch((err) => {
         if (session !== this.session) return;
+        this.starting = false;
+        if (this.stopWhenStarted) return;
+        this.clearWatchdog();
         const support = parseSupportError(err);
         this.status = "error";
         this.error = support?.message ?? `Couldn't start typing: ${String(err)}`;
@@ -131,6 +154,27 @@ export class ExternalController implements PlaybackDriver {
         this.emit();
       });
     return true;
+  }
+
+  /** Ends a session that never gets past "preparing", with an explanation. */
+  private armWatchdog(session: number) {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (session !== this.session || this.status !== "playing" || this.info.phase !== "preparing") return;
+      void this.bridge.control("stop").catch(() => {});
+      this.stopWhenStarted = this.starting;
+      this.status = "error";
+      this.error =
+        "Typewriter couldn't start typing: the typing engine didn't get ready within 20 seconds. Nothing was typed. " +
+        "Press Type into app to try again; if it keeps happening, restart Typewriter.";
+      this.info = { ...this.info, phase: "failed", reason: "start-timeout", message: this.error };
+      this.emit();
+    }, START_LIMIT_MS);
+  }
+  private clearWatchdog() {
+    if (this.watchdog) clearTimeout(this.watchdog);
+    this.watchdog = null;
   }
 
   pause() {
@@ -145,6 +189,17 @@ export class ExternalController implements PlaybackDriver {
   }
   stop() {
     if (!this.running()) return false;
+    if (this.starting || this.info.phase === "preparing") {
+      // Nothing has been typed yet. Settle at once; the native session (which may not
+      // exist yet) is told to stop now, and again as soon as Start returns.
+      this.stopWhenStarted = this.starting;
+      this.clearWatchdog();
+      void this.bridge.control("stop").catch(() => {});
+      this.status = "stopped";
+      this.info = { ...this.info, phase: "stopped", reason: "user", message: "Stopped before typing began. Nothing was typed." };
+      this.emit();
+      return true;
+    }
     void this.bridge.control("stop").catch(() => {
       // No native session (it may have just ended): settle locally.
       this.status = "stopped";
@@ -213,7 +268,9 @@ export class ExternalController implements PlaybackDriver {
     this.receivedAt = this.now();
     const target = u.target ? { title: u.target.title, appName: u.target.appName } : this.info.target;
     this.info = { ...this.info, phase: u.phase, countdownMs: u.countdownMs, target, reason: u.reason, message: u.message };
+    if (u.phase !== "preparing") this.clearWatchdog();
     switch (u.phase) {
+      case "preparing":
       case "waiting":
       case "countdown":
       case "typing":

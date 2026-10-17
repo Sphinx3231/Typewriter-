@@ -60,7 +60,7 @@ export interface PlaybackSnapshot {
   external?: ExternalInfo;
 }
 
-export type ExternalPhase = "idle" | "waiting" | "countdown" | "typing" | "paused" | "resuming" | "completed" | "stopped" | "failed";
+export type ExternalPhase = "idle" | "preparing" | "waiting" | "countdown" | "typing" | "paused" | "resuming" | "completed" | "stopped" | "failed";
 
 export interface ExternalInfo {
   phase: ExternalPhase;

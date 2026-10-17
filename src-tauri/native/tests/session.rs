@@ -26,6 +26,8 @@ struct State {
     prepared: Option<(Vec<char>, usize)>,
     /// Simulates a slow backend: prepare() keeps working until it is cancelled (or 5 s pass).
     slow_prepare: bool,
+    /// While set, the focused window can't be determined (focused_window() returns None).
+    focus_unknown: bool,
 }
 
 #[derive(Clone, Default)]
@@ -45,7 +47,12 @@ impl Fake {
 
 impl Desktop for Fake {
     fn focused_window(&mut self) -> Option<WindowInfo> {
-        self.0.lock().unwrap().focused.clone()
+        let s = self.0.lock().unwrap();
+        if s.focus_unknown {
+            None
+        } else {
+            s.focused.clone()
+        }
     }
     fn sensitive_focus(&mut self) -> Option<String> {
         self.0.lock().unwrap().sensitive.clone()
@@ -56,7 +63,7 @@ impl Desktop for Fake {
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
     }
-    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
+    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool, progress: &mut dyn FnMut(usize, usize)) {
         let slow = {
             let mut s = self.0.lock().unwrap();
             let sent = s.keys_sent;
@@ -67,6 +74,7 @@ impl Desktop for Fake {
         while slow && !cancelled() && t0.elapsed() < Duration::from_secs(5) {
             thread::sleep(Duration::from_millis(5));
         }
+        progress(1, 1);
     }
     fn send(&mut self, a: &KeyAction) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
@@ -89,13 +97,17 @@ struct Run {
 }
 
 fn start(fake: &Fake, events: Vec<Event>, countdown_ms: u64) -> Run {
+    start_with(fake, events, countdown_ms, 15_000, 180_000)
+}
+
+fn start_with(fake: &Fake, events: Vec<Event>, countdown_ms: u64, prepare_timeout_ms: u64, wait_timeout_ms: u64) -> Run {
     let updates = Arc::new(Mutex::new(Vec::new()));
     let u2 = updates.clone();
     let control = Control::default();
     let c2 = control.clone();
     let desk = fake.clone();
     let handle = thread::spawn(move || {
-        let cfg = Config { events, countdown_ms, resume_countdown_ms: 100, own_pid: OWN };
+        let cfg = Config { events, countdown_ms, resume_countdown_ms: 100, own_pid: OWN, prepare_timeout_ms, wait_timeout_ms };
         Session::new(cfg, desk, c2, Box::new(move |u| u2.lock().unwrap().push(u))).run()
     });
     Run { control, updates, handle }
@@ -125,7 +137,8 @@ fn never_types_while_typewriter_has_focus() {
     let r = start(&fake, events_for("hello", 5.0), 50);
     thread::sleep(Duration::from_millis(400));
     assert_eq!(fake.keys(), 0);
-    assert!(phases(&r.updates).iter().all(|p| p == "waiting"));
+    // Getting ready, then waiting: never a countdown or typing while Typewriter has focus.
+    assert_eq!(phases(&r.updates), ["preparing", "waiting"]);
     r.control.send(Command::Stop);
     assert_eq!(r.handle.join().unwrap(), "stopped");
     assert_eq!(fake.keys(), 0);
@@ -231,11 +244,12 @@ fn user_pause_and_resume() {
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));
     let text = "user pause check, nothing lost";
-    // 600 ms of typing, so the Pause at ~80 ms still lands mid-session on a slow CI runner.
-    let r = start(&fake, events_for(text, 20.0), 10);
-    thread::sleep(Duration::from_millis(80));
+    // 1.2 s of typing. Pause once typing has really begun, and allow a slow CI runner
+    // (macOS) plenty of time to report it: a fixed 300 ms limit failed there.
+    let r = start(&fake, events_for(text, 40.0), 10);
+    assert!(wait_for_phase(&r, "typing", 2000));
     r.control.send(Command::Pause);
-    assert!(wait_for_phase(&r, "paused", 300));
+    assert!(wait_for_phase(&r, "paused", 2000));
     let k = fake.keys();
     thread::sleep(Duration::from_millis(200));
     assert_eq!(fake.keys(), k);
@@ -379,4 +393,112 @@ fn full_sessions_reproduce_engine_timelines_with_typos() {
         assert_eq!(r.handle.join().unwrap(), "completed", "{}", c.name);
         assert_eq!(fake.text("doc"), c.source, "{}", c.name);
     }
+}
+
+fn last(updates: &Arc<Mutex<Vec<Update>>>) -> Update {
+    updates.lock().unwrap().last().cloned().unwrap()
+}
+
+#[test]
+fn preparing_is_reported_first_and_progress_is_visible() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let r = start(&fake, events_for("ok", 2.0), 10);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let u = r.updates.lock().unwrap();
+    assert_eq!(u[0].phase, "preparing", "the first update must say Typewriter is getting ready");
+    assert!(u.iter().any(|x| x.phase == "preparing" && x.message.as_deref().unwrap_or("").contains("1 of 1")), "no preparation progress was reported");
+}
+
+#[test]
+fn preparation_that_never_finishes_fails_with_an_explanation_instead_of_hanging() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    fake.0.lock().unwrap().slow_prepare = true;
+    let t0 = Instant::now();
+    let r = start_with(&fake, events_for("never typed", 2.0), 10, 300, 180_000);
+    assert_eq!(r.handle.join().unwrap(), "failed");
+    // Well under the 5 s the stuck preparation would otherwise take (margin for slow CI runners).
+    assert!(t0.elapsed() < Duration::from_millis(3000), "took {:?}: the time limit wasn't applied", t0.elapsed());
+    let u = last(&r.updates);
+    assert_eq!(u.reason.as_deref(), Some("prepare-timeout"));
+    assert!(u.message.as_deref().unwrap_or("").contains("nothing was typed"), "{:?}", u.message);
+    assert_eq!(fake.keys(), 0);
+}
+
+#[test]
+fn waiting_for_a_target_has_a_time_limit_and_says_why() {
+    let fake = Fake::default();
+    fake.focus(win("tw", OWN, "Typewriter"));
+    let r = start_with(&fake, events_for("never typed", 2.0), 50, 15_000, 400);
+    assert_eq!(r.handle.join().unwrap(), "failed");
+    let u = last(&r.updates);
+    assert_eq!(u.reason.as_deref(), Some("no-target"));
+    assert!(u.message.as_deref().unwrap_or("").contains("Nothing was typed"), "{:?}", u.message);
+    assert_eq!(fake.keys(), 0);
+}
+
+#[test]
+fn an_unknown_focused_window_is_explained_while_waiting() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().focus_unknown = true;
+    let r = start(&fake, events_for("abc", 2.0), 50);
+    let t0 = Instant::now();
+    let mut explained = false;
+    while t0.elapsed() < Duration::from_secs(4) && !explained {
+        explained = r.updates.lock().unwrap().iter().any(|u| u.phase == "waiting" && u.reason.as_deref() == Some("focus-unknown") && u.message.is_some());
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(explained, "waited silently while the focused window was unknown");
+    assert_eq!(fake.keys(), 0);
+    r.control.send(Command::Stop);
+    assert_eq!(r.handle.join().unwrap(), "stopped");
+}
+
+#[test]
+fn a_momentary_unknown_focus_doesnt_pause_typing() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let text = "focus blips are not focus changes";
+    let r = start(&fake, events_for(text, 15.0), 10);
+    assert!(wait_for_phase(&r, "typing", 2000));
+    thread::sleep(Duration::from_millis(100));
+    fake.0.lock().unwrap().focus_unknown = true;
+    // Much shorter than the 300 ms settle time, even if this sleep overshoots on a slow runner.
+    thread::sleep(Duration::from_millis(30));
+    fake.0.lock().unwrap().focus_unknown = false;
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert!(!phases(&r.updates).contains(&"paused".to_string()), "paused on a momentary focus blip: {:?}", phases(&r.updates));
+    assert_eq!(fake.text("doc"), text);
+}
+
+#[test]
+fn stop_while_preparing_types_nothing() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    fake.0.lock().unwrap().slow_prepare = true;
+    let r = start(&fake, events_for("never typed", 2.0), 10);
+    assert!(wait_for_phase(&r, "preparing", 2000));
+    r.control.send(Command::Stop);
+    assert_eq!(r.handle.join().unwrap(), "stopped");
+    assert_eq!(fake.keys(), 0);
+}
+
+#[test]
+fn waiting_for_the_keymap_lock_ends_when_cancelled_and_succeeds_once_released() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static KEYMAP: Mutex<()> = Mutex::new(());
+    let held = KEYMAP.lock().unwrap();
+    // Held by a previous session: a cancelled wait gives up promptly.
+    let stop = Arc::new(AtomicBool::new(false));
+    let s2 = stop.clone();
+    let waiter = thread::spawn(move || lock_unless(&KEYMAP, &|| s2.load(Ordering::SeqCst)).is_some());
+    thread::sleep(Duration::from_millis(100));
+    stop.store(true, Ordering::SeqCst);
+    let t0 = Instant::now();
+    assert!(!waiter.join().unwrap(), "got the lock while another session held it");
+    assert!(t0.elapsed() < Duration::from_millis(1500));
+    // Released: the next wait gets it.
+    drop(held);
+    assert!(lock_unless(&KEYMAP, &|| false).is_some());
 }

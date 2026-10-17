@@ -60,7 +60,7 @@ export function SessionBar({ session, onCopy }: { session: Session; onCopy: () =
   const finishAt = playing ? new Date(Date.now() + remaining) : idle && total > 0 ? new Date(Date.now() + total) : null;
   const ext = snapshot.external;
   const externalMode = session.destination === "external";
-  const arming = !!ext && (ext.phase === "waiting" || ext.phase === "countdown" || ext.phase === "resuming");
+  const arming = !!ext && (ext.phase === "preparing" || ext.phase === "waiting" || ext.phase === "countdown" || ext.phase === "resuming");
   const canStart = !blank && issues.length === 0 && (!externalMode || session.support.available);
 
   let primary: { label: string; icon: JSX.Element; onClick: () => void; disabled?: boolean; hint: string; testid: string };

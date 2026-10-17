@@ -74,9 +74,14 @@ pub fn probe() -> Result<(), String> {
     Ok(())
 }
 
+/// What `connect` returns when it gave up waiting for the keymap (Stop or the preparation time limit).
+pub const CANCELLED: &str = "cancelled";
+
 impl XTyper {
-    pub fn connect() -> Result<Self, String> {
-        let keymap = KEYMAP.lock().unwrap_or_else(|e| e.into_inner());
+    /// Waits for any previous session to finish restoring the keymap, unless `cancelled()`
+    /// turns true first (then fails with `CANCELLED`).
+    pub fn connect(cancelled: &dyn Fn() -> bool) -> Result<Self, String> {
+        let keymap = crate::platform::lock_unless(&KEYMAP, cancelled).ok_or(CANCELLED)?;
         let (conn, screen) = x11rb::connect(None).map_err(|e| e.to_string())?;
         conn.xtest_get_version(2, 2).map_err(|e| e.to_string())?.reply().map_err(|_| "The X server has no XTest extension.".to_string())?;
         let root = conn.setup().roots[screen].root;
@@ -151,22 +156,22 @@ impl XTyper {
     /// as many as there are spare codes, so typing normally never remaps mid-session.
     /// One change at a time, each given time to settle: apps that see a burst of
     /// keymap changes can miss some of them.
-    pub fn prebind(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
+    /// `progress(done, total)` is called after each binding.
+    pub fn prebind(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool, progress: &mut dyn FnMut(usize, usize)) {
+        // Line breaks and tabs are sent as their own keys, never as symbols.
+        let mut todo: Vec<u32> = Vec::new();
         for &c in chars {
-            if cancelled() || self.bound.len() >= self.spare.len() {
-                break;
-            }
-            // Line breaks and tabs are sent as their own keys, never as symbols.
-            if c.is_control() {
-                continue;
-            }
             let ks = keysym_for(c);
-            if self.lookup(ks).is_some() || self.bound.contains_key(&ks) {
-                continue;
+            if !c.is_control() && self.lookup(ks).is_none() && !todo.contains(&ks) {
+                todo.push(ks);
             }
-            if self.bind(ks).is_err() {
+        }
+        todo.truncate(self.spare.len());
+        for (i, &ks) in todo.iter().enumerate() {
+            if cancelled() || self.bind(ks).is_err() {
                 break;
             }
+            progress(i + 1, todo.len());
         }
     }
 

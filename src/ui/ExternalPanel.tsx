@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Keyboard, MonitorSmartphone, MousePointerClick, ShieldCheck, Timer } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Keyboard, LoaderCircle, MonitorSmartphone, MousePointerClick, ShieldCheck, Timer } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import type { ExternalInfo } from "../engine";
 import type { Host } from "../platform";
@@ -20,6 +20,8 @@ export function useStopShortcut(host: Host): string {
 
 export function externalLabel(ext: ExternalInfo): string | undefined {
   switch (ext.phase) {
+    case "preparing":
+      return "Getting ready";
     case "waiting":
       return "Switch to your document";
     case "countdown":
@@ -54,13 +56,19 @@ export function ExternalStatus({ session }: { session: Session }) {
   };
 
   let body: JSX.Element | null = null;
-  if (ext.phase === "waiting")
+  if (ext.phase === "preparing")
+    body = (
+      <p data-testid="ext-preparing">
+        <LoaderCircle size={15} aria-hidden="true" className="spin" /> {ext.message ?? "Getting the keyboard ready…"} Nothing is typed yet. You can Cancel at any time.
+      </p>
+    );
+  else if (ext.phase === "waiting")
     body = (
       <p>
         <MousePointerClick size={15} aria-hidden="true" />{" "}
         {inChrome
           ? ext.message ?? "Switch to the tab you want to type into."
-          : "Switch to your document and click exactly where the text should start. The countdown begins when Typewriter loses focus."}{" "}
+          : ext.message ?? "Switch to your document and click exactly where the text should start. The countdown begins when Typewriter loses focus."}{" "}
         Nothing is typed yet.
       </p>
     );
@@ -126,7 +134,7 @@ export function ExternalStatus({ session }: { session: Session }) {
         </div>
       );
   return (
-    <div className={`ext-status ext-status--${ext.phase}`} role="status" aria-live="polite" data-testid="ext-status">
+    <div className={`ext-status ext-status--${ext.phase}`} role="status" aria-live="polite" data-testid="ext-status" data-phase={ext.phase}>
       {body}
       {!ext.shortcutRegistered && (ext.phase === "typing" || ext.phase === "countdown") ? (
         <p className="ext-status__warn">
@@ -217,7 +225,7 @@ export function OutputSettings({ session }: { session: Session }) {
           <div className={`permission permission--${support.available ? "ok" : "no"}`} data-testid="ext-support">
             {support.available ? <ShieldCheck size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}
             <span>{support.message}</span>
-            {!support.available && support.state === "permission-denied" ? (
+            {!support.available && support.state === "permission-denied" && support.platform !== "chrome" ? (
               <Button size="sm" variant="secondary" onClick={() => void session.refreshSupport(true)}>
                 Grant access
               </Button>

@@ -3,7 +3,7 @@ use std::time::Instant;
 use typewriter_native::{Desktop, KeyAction, RealDesktop};
 
 fn main() {
-    let mut d = RealDesktop::new().expect("desktop");
+    let mut d = RealDesktop::new(&|| false).expect("desktop");
     let text: String = "Long passages must arrive intact, even at a brisk pace. ".repeat(5);
     let n = text.chars().count();
     let t = Instant::now();

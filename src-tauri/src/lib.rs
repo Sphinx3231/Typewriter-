@@ -22,6 +22,8 @@ fn stop_shortcut() -> Shortcut {
 #[derive(Default)]
 struct AppState {
     control: Mutex<Option<Control>>,
+    /// The latest status of the current session, for a status window that opens late.
+    last: Mutex<Option<serde_json::Value>>,
     /// Typing threads that may still be running or restoring the keymap.
     workers: Mutex<Vec<std::thread::JoinHandle<String>>>,
     /// Set once the typing threads have been waited for, so the final exit can proceed.
@@ -31,6 +33,11 @@ struct AppState {
 /// Longest the app waits on exit for typing threads to stop and clean up (on X11,
 /// removing temporary key bindings takes up to a few seconds).
 const EXIT_GRACE: Duration = Duration::from_secs(10);
+
+/// Longest the keyboard may take to get ready before the session fails with an explanation.
+const PREPARE_TIMEOUT_MS: u64 = 15_000;
+/// Longest a session waits for the user to click into another window.
+const WAIT_TIMEOUT_MS: u64 = 180_000;
 
 /// Stops any session and waits (bounded) for every typing thread to finish, so
 /// nothing is left behind in the user's keymap when the process exits. Runs off the
@@ -81,8 +88,11 @@ struct StartResult {
     shortcut_registered: bool,
 }
 
+/// Async on purpose: it creates the status window, and on Windows creating a window
+/// in a synchronous command deadlocks (see WebviewWindowBuilder's "Known issues").
+/// That deadlock left the status window blank and typing never started.
 #[tauri::command]
-fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool) -> Result<StartResult, String> {
+async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool) -> Result<StartResult, String> {
     // Only one session at a time.
     stop_session(&app);
     let support = check_support(false);
@@ -101,11 +111,21 @@ fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimiz
         }
     }
 
-    let cfg = Config { events, countdown_ms, resume_countdown_ms: 3000, own_pid: std::process::id() as u64 };
+    let cfg = Config {
+        events,
+        countdown_ms,
+        resume_countdown_ms: 3000,
+        own_pid: std::process::id() as u64,
+        prepare_timeout_ms: PREPARE_TIMEOUT_MS,
+        wait_timeout_ms: WAIT_TIMEOUT_MS,
+    };
+    *app.state::<AppState>().last.lock().unwrap() = None;
     let handle = app.clone();
     let (control, worker) = spawn_session(cfg, move |update| {
         let done = matches!(update.phase.as_str(), "completed" | "stopped" | "failed");
-        let _ = handle.emit("external://update", UpdateEvent { update: &update, shortcut_registered });
+        let event = UpdateEvent { update: &update, shortcut_registered };
+        *handle.state::<AppState>().last.lock().unwrap() = serde_json::to_value(&event).ok();
+        let _ = handle.emit("external://update", event);
         if done {
             let _ = handle.global_shortcut().unregister(stop_shortcut());
             handle.state::<AppState>().control.lock().unwrap().take();
@@ -130,6 +150,12 @@ fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimiz
         workers.push(worker);
     }
     Ok(StartResult { shortcut_registered })
+}
+
+/// The current session's latest status (or null), so a window can catch up.
+#[tauri::command]
+fn external_state(app: AppHandle) -> Option<serde_json::Value> {
+    app.state::<AppState>().last.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -200,7 +226,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![external_support, external_start, external_control, read_clipboard, show_main])
+        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main])
         .setup(|app| {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.

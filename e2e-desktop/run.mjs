@@ -338,6 +338,29 @@ async function main() {
     await until(async () => (await state()).status === "Stopped", 5000, "cancel");
   });
 
+  await check("Cancel right after Start, while the keyboard is still being prepared, types nothing; the next session types exactly", async () => {
+    await resetDoc();
+    // Many characters that aren't on the layout, so getting the keyboard ready takes a while.
+    const text = "日本語中文한국어Ελληνικάαβγδ→←↑↓∑∏√∞≈≠≤≥ ok";
+    await prepare(text, { seconds: 4, mistakes: "Off", minimize: false, countdown: 1 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await until(() => ui(`!!document.querySelector('[data-testid="btn-cancel"]')`), 2000, "Cancel while getting ready");
+    await ui(`(__tw.click("btn-cancel"), 1)`);
+    await until(async () => (await state()).status === "Stopped", 5000, "stopped");
+    await focusDoc();
+    await sleep(3500);
+    assert((await docValue()) === "", `typed after Cancel: ${JSON.stringify(await docValue())}`);
+    assert((await state()).status === "Stopped", "status changed after Cancel");
+    await until(async () => boundKeysyms([..."日本語→∑"]).length === 0, 8000, "temporary key bindings removed");
+    // The engine is free again: the next session works.
+    await resetDoc();
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 30000, "second session");
+    assert((await docValue()) === text, `document differs: ${JSON.stringify(await docValue())}`);
+  });
+
   await check("types tricky text into another app with typos, corrections, unicode, tabs and line breaks — exact result", async () => {
     await resetDoc();
     await prepare(TRICKY, { seconds: 20, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildScript, buildTimeline, DEFAULT_SETTINGS, type TypingEvent } from "../engine";
 import type { Bridge, NativeUpdate } from "./bridge";
-import { ExternalController } from "./external";
+import { ExternalController, START_LIMIT_MS } from "./external";
 import { verifyCopiedText } from "./verify";
 
 function fakeBridge(opts: { failStart?: string; clipboard?: string } = {}) {
@@ -35,6 +35,23 @@ const timeline = () => buildTimeline(buildScript(TEXT, settings), { ...settings,
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+/** Makes the bridge's start() wait until resolve() is called. */
+function deferredStart(bridge: Bridge) {
+  const inner = bridge.start;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  bridge.start = async (...a) => {
+    const r = await inner(...a);
+    await gate;
+    return r;
+  };
+  return { resolve: () => release() };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("external output adapter", () => {
   it("arms without typing, mirrors native progress, and never claims the document matches", async () => {
     const f = fakeBridge();
@@ -46,8 +63,11 @@ describe("external output adapter", () => {
     await flush();
     expect(f.calls).toEqual(["start"]);
     expect(f.events()).toHaveLength(tl.events.length);
-    expect(c.getSnapshot().external?.phase).toBe("waiting");
+    // Nothing claims to be waiting for a window until the typing engine says it is ready.
+    expect(c.getSnapshot().external?.phase).toBe("preparing");
     expect(c.buffer.text()).toBe("");
+    f.push({ phase: "waiting" });
+    expect(c.getSnapshot().external?.phase).toBe("waiting");
 
     f.push({ phase: "countdown", countdownMs: 3000 });
     expect(c.getSnapshot().external?.phase).toBe("countdown");
@@ -114,6 +134,93 @@ describe("external output adapter", () => {
     const r = await c.verifyFromClipboard();
     expect(r.status).toBe("verified");
     expect(c.getSnapshot().external?.verification).toBe("verified");
+  });
+
+  it("shows preparing while Start is pending, and the engine's preparation progress", async () => {
+    const f = fakeBridge();
+    const d = deferredStart(f.bridge);
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    expect(c.start()).toBe(true);
+    expect(c.getStatus()).toBe("playing");
+    expect(c.getSnapshot().external?.phase).toBe("preparing");
+    expect(c.getSnapshot().external?.message).toMatch(/ready/);
+    expect(c.pause()).toBe(false);
+    f.push({ phase: "preparing", message: "Setting up 2 of 5 characters that aren't on your keyboard…" });
+    expect(c.getStatus()).toBe("playing");
+    expect(c.getSnapshot().external?.message).toMatch(/2 of 5/);
+    d.resolve();
+    await flush();
+    f.push({ phase: "waiting" });
+    expect(c.getSnapshot().external?.phase).toBe("waiting");
+  });
+
+  it("Stop while Start is still pending settles at once, and the session is stopped once it exists", async () => {
+    const f = fakeBridge();
+    const d = deferredStart(f.bridge);
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    expect(c.stop()).toBe(true);
+    expect(c.getStatus()).toBe("stopped");
+    expect(c.getSnapshot().external?.message).toMatch(/Nothing was typed/);
+    expect(f.calls.filter((x) => x === "stop")).toHaveLength(1);
+    d.resolve();
+    await flush();
+    // The session that Start created is told to stop too, so it can't type later.
+    expect(f.calls.filter((x) => x === "stop")).toHaveLength(2);
+    // Its updates no longer change anything.
+    f.push({ phase: "typing", index: 5 });
+    expect(c.getStatus()).toBe("stopped");
+    expect(c.buffer.text()).toBe("");
+    // And a new session can be started.
+    expect(c.start()).toBe(true);
+  });
+
+  it("a start that never gets ready fails after the limit with an explanation, and stops the engine", async () => {
+    vi.useFakeTimers();
+    const f = fakeBridge();
+    deferredStart(f.bridge); // never answers
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    await vi.advanceTimersByTimeAsync(START_LIMIT_MS - 100);
+    expect(c.getSnapshot().external?.phase).toBe("preparing");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(c.getStatus()).toBe("error");
+    const s = c.getSnapshot();
+    expect(s.external?.phase).toBe("failed");
+    expect(s.external?.reason).toBe("start-timeout");
+    expect(s.error).toMatch(/Nothing was typed/);
+    expect(s.error).toMatch(/try again/);
+    expect(f.calls).toContain("stop");
+    // A new attempt is possible.
+    expect(c.start()).toBe(true);
+  });
+
+  it("the start limit doesn't fire once the engine has moved on from preparing", async () => {
+    vi.useFakeTimers();
+    const f = fakeBridge();
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    await vi.advanceTimersByTimeAsync(0);
+    f.push({ phase: "waiting" });
+    await vi.advanceTimersByTimeAsync(START_LIMIT_MS * 3);
+    expect(c.getStatus()).toBe("playing");
+    expect(c.getSnapshot().external?.phase).toBe("waiting");
+    expect(f.calls).not.toContain("stop");
+  });
+
+  it("a session that ends without sending anything is a failure, never a success", async () => {
+    const f = fakeBridge();
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    await flush();
+    f.push({ phase: "failed", reason: "nothing-sent", message: "Nothing was typed." });
+    expect(c.getStatus()).toBe("error");
+    expect(c.getSnapshot().external?.verification).toBe("not-run");
   });
 
   it("ignores stale updates when nothing is running", () => {

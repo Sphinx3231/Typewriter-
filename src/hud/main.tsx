@@ -15,6 +15,7 @@ import { LogoMark } from "../ui/Logo";
 import { clockDuration } from "../ui/format";
 
 const LABEL: Record<NativeUpdate["phase"], string> = {
+  preparing: "Getting ready",
   waiting: "Click into your document",
   countdown: "Starting in",
   typing: "Typing",
@@ -26,8 +27,10 @@ const LABEL: Record<NativeUpdate["phase"], string> = {
 };
 
 function detail(u: NativeUpdate | null): string {
-  if (!u) return "Typing starts after the countdown.";
+  if (!u) return "Getting the keyboard ready. Nothing is typed yet.";
   switch (u.phase) {
+    case "preparing":
+      return `${u.message ?? "Getting the keyboard ready…"} Nothing is typed yet.`;
     case "waiting":
       return "Typing starts after the countdown. Nothing is typed yet.";
     case "countdown":
@@ -53,6 +56,8 @@ function Hud() {
     void tauriBridge().then((b) => {
       setBridge(b);
       off = b.onUpdate(setU);
+      // This window may open after the session has already moved on: catch up.
+      void b.state?.().then((s) => s && setU((cur) => cur ?? s)).catch(() => {});
     });
     // Follow theme changes made in the main window (same storage, other window).
     const onStorage = (e: StorageEvent) => {
@@ -66,11 +71,11 @@ function Hud() {
       removeEventListener("storage", onStorage);
     };
   }, []);
-  const phase = u?.phase ?? "waiting";
+  const phase = u?.phase ?? "preparing";
   const pct = u && u.totalMs > 0 ? Math.min(100, (u.elapsedMs / u.totalMs) * 100) : 0;
   const secs = u ? Math.max(1, Math.ceil(u.countdownMs / 1000)) : 0;
   const counting = phase === "countdown" || (phase === "resuming" && !!u && u.countdownMs > 0);
-  const running = ["waiting", "countdown", "typing", "paused", "resuming"].includes(phase);
+  const running = ["preparing", "waiting", "countdown", "typing", "paused", "resuming"].includes(phase);
   const remaining = u ? Math.max(0, u.totalMs - u.elapsedMs) : 0;
   const shortcut = u?.shortcutRegistered !== false;
   const control = (c: "pause" | "resume" | "stop") => void bridge?.control(c).catch(() => {});

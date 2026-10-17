@@ -5,7 +5,7 @@
 import type { TypingEvent } from "../engine";
 
 export interface NativeUpdate {
-  phase: "waiting" | "countdown" | "typing" | "paused" | "resuming" | "completed" | "stopped" | "failed";
+  phase: "preparing" | "waiting" | "countdown" | "typing" | "paused" | "resuming" | "completed" | "stopped" | "failed";
   index: number;
   elapsedMs: number;
   totalMs: number;
@@ -32,6 +32,8 @@ export interface Bridge {
   control(command: "pause" | "resume" | "stop"): Promise<void>;
   readClipboard(): Promise<string>;
   onUpdate(fn: (u: NativeUpdate) => void): () => void;
+  /** The running session's latest status, if any (desktop: for a status window that opens late). */
+  state?(): Promise<NativeUpdate | null>;
   showMain(): Promise<void>;
 }
 
@@ -51,6 +53,7 @@ export async function tauriBridge(): Promise<Bridge> {
     control: (command) => invoke("external_control", { command }),
     readClipboard: () => invoke<string>("read_clipboard"),
     showMain: () => invoke("show_main"),
+    state: () => invoke<NativeUpdate | null>("external_state"),
     onUpdate(fn) {
       let off: (() => void) | null = null;
       let cancelled = false;

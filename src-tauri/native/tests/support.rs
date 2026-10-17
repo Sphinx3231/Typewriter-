@@ -20,7 +20,7 @@ fn without_an_x11_display_typing_is_refused_with_an_explanation() {
     // And a session can't be started at all.
     std::env::remove_var("DISPLAY");
     let r = typewriter_native::spawn_session(
-        typewriter_native::Config { events: vec![], countdown_ms: 0, resume_countdown_ms: 0, own_pid: 0 },
+        typewriter_native::Config { events: vec![], countdown_ms: 0, resume_countdown_ms: 0, own_pid: 0, prepare_timeout_ms: 1000, wait_timeout_ms: 1000 },
         |_| {},
     );
     if let Some(d) = saved {

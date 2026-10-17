@@ -34,8 +34,26 @@ pub trait Desktop {
     fn send(&mut self, action: &KeyAction) -> Result<(), String>;
     /// Called once with every character the session will type, before the
     /// countdown, so the backend can set up whatever those characters need.
-    /// It should return early once `cancelled()` is true (Stop was requested).
-    fn prepare(&mut self, _chars: &[char], _cancelled: &dyn Fn() -> bool) {}
+    /// It should return early once `cancelled()` is true (Stop was requested or the
+    /// preparation time ran out), and report `progress(done, total)` as it goes.
+    fn prepare(&mut self, _chars: &[char], _cancelled: &dyn Fn() -> bool, _progress: &mut dyn FnMut(usize, usize)) {}
+}
+
+/// Locks `m`, waiting while another holder has it, unless `cancelled()` turns true
+/// first. A poisoned lock is still taken (the data is a unit marker).
+pub fn lock_unless<T>(m: &'static std::sync::Mutex<T>, cancelled: &dyn Fn() -> bool) -> Option<std::sync::MutexGuard<'static, T>> {
+    loop {
+        match m.try_lock() {
+            Ok(g) => return Some(g),
+            Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if cancelled() {
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    }
 }
 
 /// Window titles that suggest a login or password manager. Typing is refused there.
@@ -145,7 +163,10 @@ pub struct RealDesktop {
 }
 
 impl RealDesktop {
-    pub fn new() -> Result<Self, Support> {
+    /// `cancelled` lets a Stop (or the preparation time limit) end the wait for a
+    /// previous session to release the keymap; the result is then a Support with
+    /// state "cancelled".
+    pub fn new(cancelled: &dyn Fn() -> bool) -> Result<Self, Support> {
         let support = check_support(false);
         if !support.available {
             return Err(support);
@@ -161,12 +182,21 @@ impl RealDesktop {
         #[cfg(target_os = "linux")]
         {
             // Waits for a previous session to finish restoring the keymap (see xtyper).
-            let typer = crate::xtyper::XTyper::connect().ok();
+            let typer = match crate::xtyper::XTyper::connect(cancelled) {
+                Ok(t) => Some(t),
+                Err(e) if e == crate::xtyper::CANCELLED => {
+                    return Err(Support { available: false, state: "cancelled".into(), platform: platform_name().into(), message: e });
+                }
+                Err(_) => None,
+            };
             let enigo = if typer.is_some() { None } else { Some(new_enigo()?) };
             Ok(Self { enigo, x11: linux::X11::connect(), typer })
         }
         #[cfg(not(target_os = "linux"))]
-        Ok(Self { enigo: Some(new_enigo()?) })
+        {
+            let _ = cancelled;
+            Ok(Self { enigo: Some(new_enigo()?) })
+        }
     }
 }
 
@@ -205,13 +235,13 @@ impl Desktop for RealDesktop {
         matches!(self.enigo.as_ref().map(|e| e.location()), Some(Ok((x, y))) if x <= 1 && y <= 1)
     }
 
-    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
+    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool, progress: &mut dyn FnMut(usize, usize)) {
         #[cfg(target_os = "linux")]
         if let Some(t) = self.typer.as_mut() {
-            t.prebind(chars, cancelled);
+            t.prebind(chars, cancelled, progress);
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = (chars, cancelled);
+        let _ = (chars, cancelled, progress);
     }
 
     fn send(&mut self, action: &KeyAction) -> Result<(), String> {

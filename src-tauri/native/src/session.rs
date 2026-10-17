@@ -1,7 +1,10 @@
 //! Runs a typing timeline against the desktop with safety guards.
 //!
 //! Lifecycle (one session):
-//!   waiting  – Typewriter still has focus; nothing is typed until the user switches away
+//!   preparing – the keyboard backend gets ready (on X11: binds symbols that aren't on the
+//!              layout). Bounded by `prepare_timeout_ms`; Stop ends it at once
+//!   waiting  – Typewriter still has focus; nothing is typed until the user switches away.
+//!              Bounded by `wait_timeout_ms` (then the session fails and says why)
 //!   countdown – visible countdown; switching back to Typewriter returns to `waiting`
 //!   typing   – keys are sent on the timeline into the window that had focus when the
 //!              countdown ended (the "target")
@@ -68,7 +71,34 @@ pub struct Config {
     pub resume_countdown_ms: u64,
     /// Process id of Typewriter itself; keys are never sent to its windows.
     pub own_pid: u64,
+    /// Longest the keyboard backend may take to get ready before the session fails.
+    pub prepare_timeout_ms: u64,
+    /// Longest the session waits for the user to switch to another window (including
+    /// countdowns that restarted) before it fails, so it never waits silently forever.
+    pub wait_timeout_ms: u64,
 }
+
+impl Update {
+    /// A status update before any key has been sent.
+    pub fn status(phase: &str, reason: Option<&str>, message: Option<String>) -> Self {
+        Self { phase: phase.into(), index: 0, elapsed_ms: 0.0, total_ms: 0.0, countdown_ms: 0.0, target: None, reason: reason.map(String::from), message }
+    }
+}
+
+/// What the user sees when the keyboard couldn't be made ready in time.
+pub fn prepare_timeout_message(ms: u64) -> String {
+    format!(
+        "Typewriter couldn't get the keyboard ready within {} seconds, so nothing was typed. \
+         Another typing session may still be finishing: wait a few seconds, then press Type into app again. \
+         If this keeps happening, restart Typewriter.",
+        (ms as f64 / 1000.0).round()
+    )
+}
+
+/// How long the focused window may be unknown before the user is told.
+const UNKNOWN_FOCUS_NOTICE: Duration = Duration::from_secs(2);
+/// A momentarily unknown focus (Windows reports none while focus moves) isn't a reason to pause.
+const FOCUS_SETTLE: Duration = Duration::from_millis(300);
 
 const TICK: Duration = Duration::from_millis(10);
 
@@ -103,16 +133,19 @@ pub struct Session<D: Desktop> {
     index: usize,
     elapsed_ms: f64,
     target: Option<WindowInfo>,
+    /// Key actions actually handed to the desktop; a session that sent none never "completes".
+    keys_sent: usize,
 }
 
 enum Flow {
     Continue,
     End,
+    Failed,
 }
 
 impl<D: Desktop> Session<D> {
     pub fn new(cfg: Config, desktop: D, control: Control, emit: Box<dyn FnMut(Update) + Send>) -> Self {
-        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None }
+        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None, keys_sent: 0 }
     }
 
     fn total(&self) -> f64 {
@@ -140,17 +173,35 @@ impl<D: Desktop> Session<D> {
     /// Runs to completion. Returns the final phase.
     pub fn run(mut self) -> String {
         if self.cfg.events.is_empty() {
-            self.update("completed", 0.0, None, None);
-            return "completed".into();
+            self.update("failed", 0.0, Some("nothing-to-type"), Some("There was nothing to type.".into()));
+            return "failed".into();
         }
+        self.update("preparing", 0.0, None, Some("Getting the keyboard ready…".into()));
         // Let the backend prepare for every character up front (on X11: bind the ones
         // that aren't on the keyboard layout), well before the first key is due.
-        // Preparing can take a moment, so it gives up as soon as Stop is requested.
+        // It gives up as soon as Stop is requested or the time limit is reached.
         let chars = session_chars(&self.cfg.events);
+        let deadline = Instant::now() + Duration::from_millis(self.cfg.prepare_timeout_ms);
         let control = self.control.clone();
-        self.desktop.prepare(&chars, &|| control.stop_requested());
+        let cancelled = move || control.stop_requested() || Instant::now() >= deadline;
+        let total = self.total();
+        let emit = &mut self.emit;
+        self.desktop.prepare(&chars, &cancelled, &mut |done, of| {
+            let mut u = Update::status("preparing", None, Some(format!("Setting up {done} of {of} characters that aren't on your keyboard…")));
+            u.total_ms = total;
+            emit(u);
+        });
+        if self.control.stop_requested() {
+            self.control.take();
+            return self.stop("user", None);
+        }
+        if Instant::now() >= deadline {
+            self.update("failed", 0.0, Some("prepare-timeout"), Some(prepare_timeout_message(self.cfg.prepare_timeout_ms)));
+            return "failed".into();
+        }
         match self.wait_and_count_down() {
             Flow::End => return "stopped".into(),
+            Flow::Failed => return "failed".into(),
             Flow::Continue => {}
         }
         // The window focused at the end of the countdown becomes the target.
@@ -170,6 +221,8 @@ impl<D: Desktop> Session<D> {
     fn wait_and_count_down(&mut self) -> Flow {
         let mut countdown_started: Option<Instant> = None;
         let mut last_emit = Instant::now() - EMIT_EVERY;
+        let waiting_since = Instant::now();
+        let mut unknown_since: Option<Instant> = None;
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
@@ -182,11 +235,34 @@ impl<D: Desktop> Session<D> {
                 self.update("stopped", 0.0, Some("failsafe"), Some("Stopped: mouse moved to the top-left corner.".into()));
                 return Flow::End;
             }
-            let away = self.desktop.focused_window().map(|w| !self.is_own(&w)).unwrap_or(false);
+            if waiting_since.elapsed() >= Duration::from_millis(self.cfg.wait_timeout_ms) {
+                let mins = (self.cfg.wait_timeout_ms as f64 / 60_000.0).round().max(1.0);
+                self.update(
+                    "failed",
+                    0.0,
+                    Some("no-target"),
+                    Some(format!("Nothing was typed: no other window was chosen within {mins} minutes. Press Type into app again, then click into your document.")),
+                );
+                return Flow::Failed;
+            }
+            let focused = self.desktop.focused_window();
+            if focused.is_some() {
+                unknown_since = None;
+            } else if unknown_since.is_none() {
+                unknown_since = Some(Instant::now());
+            }
+            let away = focused.map(|w| !self.is_own(&w)).unwrap_or(false);
             match (away, countdown_started) {
                 (false, _) => {
                     if countdown_started.take().is_some() || last_emit.elapsed() >= Duration::from_millis(250) {
-                        self.update("waiting", self.cfg.countdown_ms as f64, None, None);
+                        // Say so when the active window can't be read, instead of waiting silently.
+                        let note = unknown_since.filter(|t| t.elapsed() >= UNKNOWN_FOCUS_NOTICE).map(|_| {
+                            "Typewriter can't tell which window is active, so it won't type yet. Click into your document. \
+                             (On Windows, apps running as administrator can't receive typing from Typewriter.)"
+                                .to_string()
+                        });
+                        let reason = note.as_ref().map(|_| "focus-unknown");
+                        self.update("waiting", self.cfg.countdown_ms as f64, reason, note);
                         last_emit = Instant::now();
                     }
                 }
@@ -209,7 +285,13 @@ impl<D: Desktop> Session<D> {
     /// Checks that typing may continue right now. Returns a pause reason if not.
     fn guard(&mut self) -> Option<(&'static str, String)> {
         let target = self.target.clone()?;
-        match self.desktop.focused_window() {
+        let mut focused = self.desktop.focused_window();
+        let t0 = Instant::now();
+        while focused.is_none() && t0.elapsed() < FOCUS_SETTLE {
+            std::thread::sleep(Duration::from_millis(20));
+            focused = self.desktop.focused_window();
+        }
+        match focused {
             None => return Some(("focus-unknown", "Lost track of the focused window. Paused to be safe.".into())),
             Some(w) if self.is_own(&w) => return Some(("focus-typewriter", "Typewriter has focus, so typing paused. It never types into itself.".into())),
             Some(w) if !w.same_window(&target) => {
@@ -294,6 +376,7 @@ impl<D: Desktop> Session<D> {
                     self.update("failed", 0.0, Some("send-failed"), Some(format!("Couldn't send a key: {e}")));
                     return "failed".into();
                 }
+                self.keys_sent += 1;
             }
             self.index += 1;
             self.elapsed_ms = due;
@@ -303,6 +386,10 @@ impl<D: Desktop> Session<D> {
             }
         }
         self.elapsed_ms = total;
+        if self.keys_sent == 0 {
+            self.update("failed", 0.0, Some("nothing-sent"), Some("No keys were sent, so nothing was typed.".into()));
+            return "failed".into();
+        }
         self.update("completed", 0.0, None, Some("Every key was sent. Check the document to confirm the text.".into()));
         "completed".into()
     }
