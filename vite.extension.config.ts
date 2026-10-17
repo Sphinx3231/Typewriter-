@@ -3,8 +3,9 @@
  * worker, the manifest and the icons, in dist-extension/.
  *
  * EXTENSION_TEST=1 builds a test-only variant in dist-extension-test/ where the
- * optional permissions ("debugger", "clipboardRead") are granted at install, because automated browsers can't
- * click Chrome's permission prompt. The shipped build always asks at Start.
+ * optional permission ("clipboardRead") is granted at install, because automated browsers can't
+ * click Chrome's permission prompt. The shipped build asks for it at "Check copied text".
+ * ("debugger" is a required permission in both: Chrome doesn't allow it to be optional.)
  */
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";

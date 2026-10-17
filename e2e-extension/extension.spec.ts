@@ -32,7 +32,7 @@ test.describe("installation", () => {
     expect(m.side_panel?.default_path).toBe("index.html");
     expect(m.host_permissions ?? []).toEqual([]);
     expect(m.content_scripts ?? []).toEqual([]);
-    expect(m.permissions?.sort()).toEqual(["clipboardRead", "debugger", "sidePanel"]); // test build: optional ones pre-granted
+    expect(m.permissions?.sort()).toEqual(["clipboardRead", "debugger", "sidePanel"]); // test build: clipboardRead pre-granted
     expect(await sw.evaluate(() => chrome.sidePanel.getPanelBehavior())).toEqual({ openPanelOnActionClick: true });
     const cmds = await sw.evaluate(() => chrome.commands.getAll());
     expect(cmds.find((c) => c.name === "stop-typing")).toBeTruthy();
@@ -85,6 +85,18 @@ test.describe("panel UI", () => {
       await panel.screenshot({ path: `test-results/extension-panel-${width}-${after.theme === "dark" ? "light" : "dark"}.png` });
     });
   }
+
+  test("the Start button's label fits in a narrow side panel", async ({ panel }) => {
+    await panel.getByTestId("editor").fill("x");
+    await panel.getByRole("radio", { name: "Into a web page" }).click();
+    for (const width of [320, 360, 400]) {
+      await panel.setViewportSize({ width, height: 860 });
+      const btn = panel.getByTestId("btn-start");
+      await expect(btn).toHaveText(/Type into page/);
+      const fit = await btn.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(fit.scroll, `label clipped at ${width}px`).toBeLessThanOrEqual(fit.client + 1);
+    }
+  });
 
   test("offers typing into a web page, explains the permission, and labels the button", async ({ panel }) => {
     await panel.getByTestId("editor").fill("x");

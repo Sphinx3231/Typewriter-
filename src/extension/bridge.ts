@@ -30,13 +30,18 @@ export async function hasDebuggerPermission(): Promise<boolean> {
   }
 }
 
-function requestDebugger(): Promise<boolean> {
-  try {
-    return chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
-  } catch {
-    return Promise.resolve(false);
-  }
-}
+/**
+ * Shown if Chrome somehow didn't grant "debugger". It is a required permission (Chrome doesn't
+ * allow it to be optional), so this only happens with an outdated or damaged install.
+ */
+const MISSING_DEBUGGER: Support = {
+  available: false,
+  state: "permission-denied",
+  platform: "chrome",
+  message:
+    'Chrome hasn\'t given Typewriter its "debugger" permission, so it can\'t type into pages. Nothing was typed. ' +
+    "Open chrome://extensions, remove Typewriter, then load the dist-extension folder again with Load unpacked.",
+};
 
 export function extensionBridge(): Bridge {
   const listeners = new Set<(u: NativeUpdate) => void>();
@@ -67,30 +72,13 @@ export function extensionBridge(): Bridge {
   addEventListener("pagehide", () => session?.send("stop"));
 
   return {
-    async support(prompt: boolean): Promise<Support> {
-      // request() resolves at once if already granted; it must be the first call so it runs in the click.
-      const granted = prompt ? await requestDebugger() : await hasDebuggerPermission();
-      return granted
+    async support(): Promise<Support> {
+      return (await hasDebuggerPermission())
         ? { available: true, state: "ok", platform: "chrome", message: "Ready to type into web pages in this window." }
-        : {
-            available: true,
-            state: "ok",
-            platform: "chrome",
-            message: "Chrome will ask once for permission to control a tab's typing when you start.",
-          };
+        : MISSING_DEBUGGER;
     },
     async start(events: TypingEvent[], countdownMs: number, _minimize: boolean, source = "") {
-      // Must be the first call, inside the click that started it: Chrome only shows permission prompts for user gestures.
-      const granted = await requestDebugger();
-      if (!granted) {
-        const s: Support = {
-          available: false,
-          state: "permission-denied",
-          platform: "chrome",
-          message: "Typing into pages needs the \"debugger\" permission, and it wasn't granted. Nothing was typed. Start again and choose Allow.",
-        };
-        throw JSON.stringify(s);
-      }
+      if (!(await hasDebuggerPermission())) throw JSON.stringify(MISSING_DEBUGGER);
       session?.send("stop");
       const s = new ChromeTypingSession(chromeBrowser(report), events, { countdownMs, resumeCountdownMs: 3000, source }, (u) => listeners.forEach((fn) => fn(u as NativeUpdate)));
       session = s;

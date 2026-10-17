@@ -1675,10 +1675,12 @@ fieldset:disabled .segmented__opt {
   .controls {
     justify-content: stretch;
     display: grid;
-    grid-template-columns: 1.4fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
   }
+  /* Its own row, so longer labels ("Type into page", "Type again") are never cut off. */
   .controls__primary {
     min-width: 0;
+    grid-column: 1 / -1;
   }
   .controls .btn {
     padding: 0 8px;

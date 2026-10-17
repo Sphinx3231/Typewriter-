@@ -26,8 +26,8 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["sidePanel"],
-  "optional_permissions": ["debugger", "clipboardRead"],
+  "permissions": ["sidePanel", "debugger"],
+  "optional_permissions": ["clipboardRead"],
   "commands": {
     "stop-typing": {
       "suggested_key": { "default": "Alt+Shift+Period" },

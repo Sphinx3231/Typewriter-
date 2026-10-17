@@ -29,7 +29,7 @@ describe("extension bridge", () => {
     vi.resetModules();
   });
 
-  it("asks for the debugger permission first, and types nothing when it is refused", async () => {
+  it("never prompts at Start (debugger is a required permission), and types nothing if it is missing", async () => {
     const f = fakeChrome(false);
     vi.stubGlobal("chrome", f.chrome);
     vi.stubGlobal("addEventListener", vi.fn());
@@ -39,19 +39,23 @@ describe("extension bridge", () => {
     const support = parseSupportError(err);
     expect(support?.state).toBe("permission-denied");
     expect(support?.message).toMatch(/Nothing was typed/);
-    expect(f.calls).toEqual(["request:debugger"]);
+    expect(support?.message).toMatch(/chrome:\/\/extensions/);
+    // Chrome rejects permissions.request({permissions: ["debugger"]}): it can't be optional.
+    expect(f.chrome.permissions.request).not.toHaveBeenCalled();
     expect(f.chrome.debugger.attach).not.toHaveBeenCalled();
+    expect((await bridge.support(false)).available).toBe(false);
   });
 
-  it("starts a session once the permission is granted", async () => {
+  it("starts a session straight away when the permission is present", async () => {
     const f = fakeChrome(true);
     vi.stubGlobal("chrome", f.chrome);
     vi.stubGlobal("addEventListener", vi.fn());
     const { extensionBridge } = await import("./bridge");
     const bridge = extensionBridge();
+    expect((await bridge.support(true)).available).toBe(true);
     const r = await bridge.start([{ at: 0, kind: "type", text: "a", src: 1 } as never], 60_000, false, "a");
     expect(r.shortcutRegistered).toBe(true);
-    expect(f.calls[0]).toBe("request:debugger");
+    expect(f.chrome.permissions.request).not.toHaveBeenCalled();
     await bridge.control("stop");
   });
 });

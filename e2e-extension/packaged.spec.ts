@@ -2,23 +2,33 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test } from "./fixtures";
+import { expect, prepare, test } from "./fixtures";
 
 const dist = resolve(import.meta.dirname, "../dist-extension");
 test.use({ extDir: dist });
 
-test("the release build loads, asks for nothing up front, and opens", async ({ sw, context, extId }) => {
+test("the release build loads with the permissions typing needs, and opens", async ({ sw, context, extId }) => {
   const m = await sw.evaluate(() => chrome.runtime.getManifest());
   expect(m.name).toBe("Typewriter");
-  expect(m.permissions).toEqual(["sidePanel"]);
-  expect(m.optional_permissions?.sort()).toEqual(["clipboardRead", "debugger"]);
+  expect(m.permissions?.sort()).toEqual(["debugger", "sidePanel"]);
+  expect(m.optional_permissions).toEqual(["clipboardRead"]);
   expect(m.host_permissions ?? []).toEqual([]);
-  expect(await sw.evaluate(() => chrome.permissions.contains({ permissions: ["debugger"] }))).toBe(false);
+  // Chrome doesn't allow "debugger" to be optional; it must be granted at install.
+  expect(await sw.evaluate(() => chrome.permissions.contains({ permissions: ["debugger"] }))).toBe(true);
   expect(await sw.evaluate(() => chrome.sidePanel.getPanelBehavior())).toEqual({ openPanelOnActionClick: true });
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extId}/index.html`);
   await expect(page.getByTestId("btn-start")).toBeVisible();
   await expect(page.locator(".logo-mark__art:visible").first()).toBeVisible();
+});
+
+test("the release build (nothing pre-granted) types into a page, exactly", async ({ panel, target }) => {
+  const text = "Release build check: Café naïve — 日本語 👍🏽.\nSecond line.";
+  await target.locator("#ta").focus();
+  await prepare(panel, text, { seconds: 4, countdown: 2 });
+  await panel.getByTestId("btn-start").click();
+  await expect(panel.getByTestId("ext-verified")).toBeVisible({ timeout: 30_000 });
+  expect(await target.locator("#ta").inputValue()).toBe(text);
 });
 
 test("the ZIP has the manifest at its root and matches the build", async () => {
