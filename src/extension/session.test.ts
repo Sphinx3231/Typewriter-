@@ -541,7 +541,11 @@ describe("Chrome typing session: edge and failure paths", () => {
         return real(a);
       };
       expect(await s.session.run()).toBe("stopped");
-      expect(s.last()).toMatchObject({ phase: "stopped", reason: "detached", message: "The tab went away while typing." });
+      expect(s.last()).toMatchObject(
+        ev.type === "navigated"
+          ? { phase: "stopped", reason: "navigated", message: "The page navigated or reloaded, so typing stopped." }
+          : { phase: "stopped", reason: "detached", message: "The tab went away while typing." },
+      );
       expect(s.browser.sent).toHaveLength(2);
     }
   });
@@ -603,7 +607,8 @@ describe("Chrome typing session: edge and failure paths", () => {
     const spa = manual(typed("hello world"), "hello world");
     pauseAt(spa, 4, () => (spa.browser.href = "https://example.com/elsewhere"), 1000);
     expect(await spa.session.run()).toBe("stopped");
-    expect(spa.last()).toMatchObject({ phase: "stopped", reason: "detached", message: "The page navigated or the tab went away, so typing stopped." });
+    // An address change without a page load is a navigation, not a detach.
+    expect(spa.last()).toMatchObject({ phase: "stopped", reason: "navigated", message: "The page navigated or the tab went away, so typing stopped." });
     expect(spa.browser.sent).toHaveLength(4);
 
     // A reload during the resume countdown.

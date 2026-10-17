@@ -53,7 +53,8 @@ describe("text integrity", () => {
           expect(buf.caret).toBe(buf.cells.length);
         }
       }
-    });
+      // Thousands of replays: allow for a busy machine (coverage instrumentation, parallel files).
+    }, 60_000);
   }
 
   it("keeps the user's own spelling and grammar mistakes", () => {

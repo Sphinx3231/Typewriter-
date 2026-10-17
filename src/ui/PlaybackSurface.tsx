@@ -48,7 +48,10 @@ export function PlaybackSurface({
   }, []);
 
   useEffect(() => {
-    const render = () => {
+    // Whether the last render showed a correction highlight (the timer below fades it).
+    let highlighting = false;
+    /** `fromTimer`: a re-render to fade the highlight, not a key that landed. */
+    const render = (fromTimer = false) => {
       const settled = settledRef.current;
       const active = activeRef.current;
       const caret = caretRef.current;
@@ -70,6 +73,7 @@ export function PlaybackSurface({
           fixEnd = b.lastFix.end;
         }
       }
+      highlighting = fixStart < fixEnd;
       const lo = Math.min(b.caret, firstErr, fixStart, n);
 
       // Settled text: reuse what is already in the DOM where possible.
@@ -116,9 +120,11 @@ export function PlaybackSurface({
       active.replaceChildren(frag);
 
       // Solid caret while keys are landing, blinking when idle.
-      caret.classList.add("is-typing");
-      if (typingTimer.current) clearTimeout(typingTimer.current);
-      typingTimer.current = setTimeout(() => caret.classList.remove("is-typing"), 450);
+      if (!fromTimer) {
+        caret.classList.add("is-typing");
+        if (typingTimer.current) clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => caret.classList.remove("is-typing"), 450);
+      }
 
       // Keep the caret in view unless the reader scrolled away.
       const sc = scrollRef.current;
@@ -136,10 +142,11 @@ export function PlaybackSurface({
       }
     };
     render();
-    const unsub = controller.subscribe(render);
-    // Let the correction highlight fade even if no new keystroke arrives.
+    const unsub = controller.subscribe(() => render());
+    // Let the correction highlight fade even if no new keystroke arrives; once it has faded
+    // there is nothing left to redraw.
     const id = setInterval(() => {
-      if (controller.buffer.lastFix) render();
+      if (highlighting) render(true);
     }, 300);
     return () => {
       unsub();

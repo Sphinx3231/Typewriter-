@@ -267,7 +267,11 @@ export class ChromeTypingSession {
     if (this.tabChanged) return ["tab-changed", "You switched tabs, so typing paused. It only types into the tab you started in."];
     const p = await this.browser.probe();
     if (!p) return ["focus-unknown", "Couldn't check the page, so typing paused to be safe."];
-    if (p.href !== this.target!.probe.href) return "stop";
+    if (p.href !== this.target!.probe.href) {
+      // The address changed without a page load (a single-page app navigated).
+      this.navigated = true;
+      return "stop";
+    }
     if (p.sensitive) return ["sensitive", `${p.sensitive} Typing paused.`];
     if (p.elementId !== this.target!.probe.elementId) return ["focus-changed", "The text cursor moved to a different field or out of the document, so typing paused."];
     return null;
@@ -319,7 +323,8 @@ export class ChromeTypingSession {
         try {
           await this.browser.send(a);
         } catch (e) {
-          if (this.detached || this.navigated) return this.finish("stopped", "detached", "The tab went away while typing.");
+          if (this.navigated) return this.finish("stopped", "navigated", "The page navigated or reloaded, so typing stopped.");
+          if (this.detached) return this.finish("stopped", "detached", "The tab went away while typing.");
           return this.finish("failed", "send-failed", `Couldn't send a key: ${String(e)}`);
         }
       }

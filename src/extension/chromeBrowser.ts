@@ -57,7 +57,15 @@ export function chromeBrowser(onAttachChange: (tabId: number | null) => void = (
       await chrome.debugger.attach({ tabId: id }, "1.3");
       tabId = id;
       onAttachChange(id);
-      await send("Page.enable");
+      try {
+        await send("Page.enable");
+      } catch (e) {
+        // Don't leave Chrome's debugging bar on a tab the session never got to use.
+        tabId = null;
+        onAttachChange(null);
+        await chrome.debugger.detach({ tabId: id }).catch(() => {});
+        throw e;
+      }
       // Lets the page keep its text cursor while you click Typewriter's controls.
       await send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
     },

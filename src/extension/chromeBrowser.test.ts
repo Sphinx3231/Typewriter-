@@ -117,6 +117,19 @@ describe("chromeBrowser", () => {
     expect(f.commands).toEqual([]);
   });
 
+  it("detaches again when the page can't be prepared, so Chrome's debugging bar doesn't stay on that tab", async () => {
+    f.chrome.debugger.sendCommand.mockImplementation(async (_t, method) => {
+      if (method === "Page.enable") throw new Error("Cannot attach to this target");
+      return {};
+    });
+    const reports: (number | null)[] = [];
+    const b = chromeBrowser((id) => reports.push(id));
+    await expect(b.attach(5)).rejects.toThrow(/Cannot attach/);
+    expect(f.chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 5 });
+    expect(reports).toEqual([5, null]);
+    expect(await b.probe()).toBeNull();
+  });
+
   it("detaches from the attached tab and reports it, tolerating a tab that's already gone", async () => {
     const reports: (number | null)[] = [];
     const b = chromeBrowser((id) => reports.push(id));
