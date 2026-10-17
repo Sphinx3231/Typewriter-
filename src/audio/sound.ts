@@ -13,7 +13,8 @@ export class TypingSound {
   private noise: AudioBuffer | null = null;
   private enabled = false;
   private volume = 0.5;
-  private lastAt = 0;
+  /** Audio-clock time of the last click (none yet: the first one always plays). */
+  private lastAt = -Infinity;
 
   /** Must be called from a user gesture (e.g. the Start click) so the browser allows audio. */
   unlock(): void {

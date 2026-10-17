@@ -304,7 +304,8 @@ export class PlaybackController implements PlaybackDriver {
     this.frozenElapsed = this.timeline?.totalMs ?? 0;
     const output = this.buffer.text();
     if (output !== this.source || this.buffer.hasErrors()) {
-      const at = firstDifference(output, this.source);
+      // The same text with a typo cell still marked: point at that cell, not past the end.
+      const at = output === this.source ? Math.max(0, this.buffer.errs.indexOf(true)) : firstDifference(output, this.source);
       this.error = `Playback output differs from your text at character ${at + 1}. Your original text is unchanged.`;
       this.setStatus("error");
       return;

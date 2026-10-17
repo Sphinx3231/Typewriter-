@@ -53,7 +53,9 @@ function Hud() {
   const [bridge, setBridge] = useState<Bridge | null>(null);
   useEffect(() => {
     let off: (() => void) | undefined;
+    let gone = false;
     void tauriBridge().then((b) => {
+      if (gone) return; // unmounted before the bridge was ready: don't leave a listener behind
       setBridge(b);
       off = b.onUpdate(setU);
       // This window may open after the session has already moved on: catch up.
@@ -67,6 +69,7 @@ function Hud() {
     };
     addEventListener("storage", onStorage);
     return () => {
+      gone = true;
       off?.();
       removeEventListener("storage", onStorage);
     };
