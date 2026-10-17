@@ -48,12 +48,13 @@ function assert(cond, msg) {
 async function until(fn, timeoutMs, what) {
   const t0 = Date.now();
   let last;
+  let err = null;
   while (Date.now() - t0 < timeoutMs) {
-    last = await fn().catch(() => null);
+    last = await fn().catch((e) => ((err = e), null));
     if (last) return last;
     await sleep(150);
   }
-  throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}`);
+  throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}${err ? ` (last error: ${String(err.message ?? err).split("\n")[0]})` : ""}`);
 }
 async function check(name, fn) {
   if (aborted) {
@@ -179,7 +180,8 @@ async function ensureIdle() {
     }
   }
   await js(`return window.__TAURI_INTERNALS__.invoke("show_main")`).catch(() => {});
-  await until(() => ui(`__tw.has("btn-start")`), 8000, "an idle app");
+  // Start exists (it stays disabled until there is text).
+  await until(() => ui(`!!document.querySelector('[data-testid="btn-start"]')`), 8000, "an idle app");
 }
 async function configure(text, { seconds, mistakes = "Medium", countdown = 3 }) {
   await ensureIdle();

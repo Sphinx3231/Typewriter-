@@ -11,6 +11,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 public static class TwInput {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
@@ -36,11 +37,12 @@ switch ($Cmd) {
     foreach ($k in 0x20, 0x10, 0x11) { [TwInput]::keybd_event($k, 0, 0x2, [UIntPtr]::Zero) }
   }
   "shot" {
-    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+    # Screen size from Win32 (Screen.PrimaryScreen is null in some non-interactive sessions).
+    Add-Type -AssemblyName System.Drawing
+    $w = [TwInput]::GetSystemMetrics(0); $h = [TwInput]::GetSystemMetrics(1)
+    $bmp = New-Object System.Drawing.Bitmap ([int]$w), ([int]$h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+    $g.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size ([int]$w), ([int]$h)))
     $bmp.Save($A, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
   }
