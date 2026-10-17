@@ -66,6 +66,31 @@ Target: Notepad (Windows), TextEdit in plain-text mode (macOS), or gedit/Kate (L
 
 Send back: the screenshots, and whether the status window was ever blank.
 
+## 1a. Windows: the same short text into three targets, with diagnostics
+
+This is the check for "the countdown runs, then nothing appears". Use the 1.1.1 build from step 0 and confirm its **Build** code first.
+
+1. Open Typewriter › **Settings** › **About**. Note the version and Build code.
+2. Paste exactly: `Hello from Typewriter 123.`
+3. Settings: **Into another app**, duration 6 s, Typing mistakes **Off**, countdown 3 s.
+4. Run it three times, one per target:
+   - **Windows Notepad** (opened normally, not as administrator);
+   - **an ordinary text field in Opera** (for example a search box, or the box on a site's contact form; don't send it);
+   - **a new private Google Doc in Opera**.
+
+   Each time: press **Type into app**, click into the target, keep your hands off the keyboard, wait.
+5. For each target, write down:
+   - did the countdown appear and end?
+   - did the first character appear, and about how long after the countdown ended?
+   - what did the status window say at the end (or while it was stuck)?
+6. Right after the three runs: Typewriter › **Settings** › **About** › **Copy typing diagnostics**, then paste it into your reply.
+   It contains timings, window types and error codes, not your text or window titles. If the app can't be reached, the same log is the file `%LOCALAPPDATA%\app.typewriter.desktop\logs\typing-diagnostics.log`.
+7. Optional: record the screen with the Snipping Tool (Win+Shift+R) for the Google Docs run, with nothing personal in view.
+
+If it's stuck on "Waiting for you to release Ctrl, Alt, Shift or Cmd.", press and release each of those keys once and say whether typing then started.
+
+Send back: the Build code, the three answers from step 5, and the pasted diagnostics.
+
 ## 2. Desktop: controls in every phase
 
 Use the same text with a 60 s duration.

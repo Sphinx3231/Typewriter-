@@ -13,7 +13,7 @@ It's built with [Tauri 2](https://tauri.app) (MIT/Apache-2.0). The window runs t
 | Linux (Debian/Ubuntu) | `Typewriter_1.1.0_amd64.deb` | locally and in CI | **yes**: installed with apt (upgrade from 1.0.0); the full end-to-end suite passed against `/usr/bin/typewriter` |
 | Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | locally and in CI | **yes**: launched; startup, exact typing, emergency stop and back-to-back session checks passed |
 | Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | locally and in CI | partly: package digests and files verified, installed into a scratch root, and its binary passed launch/typing/stop checks on Debian. **Not installed on Fedora/openSUSE** |
-| Windows 10/11 (x64) | `Typewriter_1.1.0_x64-setup.exe`, `Typewriter_1.1.0_x64_en-US.msi` | GitHub Actions (`Desktop builds`) | built, and session tests pass in CI; **never launched** |
+| Windows 10/11 (x64) | `Typewriter_1.1.1_x64-setup.exe`, `Typewriter_1.1.1_x64_en-US.msi` | GitHub Actions (`Desktop builds`) | the `-setup.exe` is installed silently and the **installed** app passes the Windows end-to-end checks on a GitHub-hosted Windows Server 2022 runner (see Tests). The `.msi` is built but not installed. Not run on a personal Windows PC |
 | macOS 11+ (Apple Silicon) | `Typewriter_1.1.0_aarch64.dmg` | GitHub Actions (`Desktop builds`) | built, and session tests pass in CI; **never launched**. There's no Intel (x86-64) build: the CI runner is Apple Silicon. |
 
 ### Get the installer
@@ -65,6 +65,13 @@ Every stage has a time limit and ends with an explanation. Nothing is typed in a
 | "Typewriter can't tell which window is active, so it won't type yet" (while waiting) | The system won't say which window has focus. On Windows this happens with apps running as administrator. | Click into your document. If the message stays, that app can't receive typing from Typewriter: use a different app. |
 | "Nothing was typed: no other window was chosen within 3 minutes" | You didn't click into another window after pressing Start. | Press **Type into app** again, then click into your document. |
 | "No keys were sent, so nothing was typed" | No key could be sent. A finished session is never reported as done when nothing was sent. | Check the target app, then try again. |
+| "Waiting for you to release Ctrl, Alt, Shift or Cmd." (after the countdown) | Windows reports one of those keys as held down. Typing waits so a held key doesn't turn letters into shortcuts. | Press and release Ctrl, Alt, Shift and the Windows key once each. |
+
+### Typing diagnostics
+
+When typing doesn't behave, **Settings › About › Copy typing diagnostics** copies the log of the last sessions to the clipboard. Paste it into a message. It records, with times in milliseconds: Start received, keyboard backend ready, each focus change, countdown start and end, the chosen window, typing started, the password-field check time, any wait for held keys, the first key sent and whether the system accepted it, pauses, send errors (with the Windows error code), and how the session ended. Windows are described by app name, process id, window handle, window class, the class of the control that has keyboard focus, whether it responds, and the privilege level of the target and of Typewriter.
+
+It never contains the text being typed or window titles (only their length). The file is `typing-diagnostics.log` in the app's log folder (Windows: `%LOCALAPPDATA%\app.typewriter.desktop\logs`; Linux: `~/.local/share/app.typewriter.desktop/logs`; macOS: `~/Library/Logs/app.typewriter.desktop`). It is trimmed to the last 256 KB once it passes 512 KB. The header of each session names the app version and the build (git commit).
 
 **Stop and Cancel work in every stage,** including **Getting ready**. Ctrl+Shift+Space works from the moment the status window appears.
 
@@ -182,7 +189,7 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
   - Wayland refusal.
 
   After the emergency stop, the mouse-corner stop, Stop in the status window and "Keep Typewriter open", it checks that the source text is unchanged.
-- **Windows end-to-end (`node e2e-desktop/windows.mjs`, in the Desktop builds workflow on `windows-2022`):** the real `typewriter.exe` on a real Windows desktop session, driven through tauri-driver; real `SendInput` clicks and Ctrl+Shift+Space; the target is a native WinForms text box. 6 checks: launch; Type into app answers at once and the status window shows its controls; tricky Unicode text with typos arrives exactly; pause/resume from the status window; clicking another window pauses and nothing goes there; emergency stop. On a failure it prints the app's state, the status window's state and the focused window. (`windows-2022` because WebView2 on the newer image ignores the remote-debugging flag on the elevated runner.)
+- **Windows end-to-end (`node e2e-desktop/windows.mjs`, in the Desktop builds workflow on `windows-2022`):** the real `typewriter.exe` on a real Windows desktop session, driven through tauri-driver; real `SendInput` clicks and Ctrl+Shift+Space; it tests the **installed** app from the NSIS installer, and first checks that Settings shows the expected version and commit. Checks: launch; build identity; Type into app answers at once and the status window shows its controls; into a native WinForms text box, tricky Unicode text with typos arrives exactly, pause/resume from the status window, clicking another window pauses and nothing goes there, emergency stop; the same short text into Windows Notepad, a plain text field in Opera and a Docs-like page in Opera (each records when the first character arrived and prints the typing diagnostics); tricky text into a Docs-like page in Chrome, Edge and Opera; the Chrome extension's APIs in Opera. On a failure it prints the app's state, the status window's state and the focused window. (`windows-2022` because WebView2 on the newer image ignores the remote-debugging flag on the elevated runner.)
 - **Real Wayland session (`npm run test:desktop:wayland`):** the packaged app runs as a native Wayland client under headless Weston with XWayland. It checks that typing into other apps is refused with the explanation, and that the preview reproduces Unicode text exactly. Needs `weston` and `Xwayland`.
 
 ---
@@ -191,7 +198,7 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
 
 - **Google Docs end-to-end is not verified.** This environment has no Google account and no network access to Google. The same mechanism is verified into a real Chromium text area. To check it yourself, use **Check copied text**.
 - **Windows is verified on a GitHub-hosted runner only, macOS not at all.** There is no Intel macOS build.
-  - Windows: the end-to-end checks above pass on Windows Server 2022. The installers come from CI and haven't been installed and launched; nothing has run on a personal Windows laptop.
+  - Windows: the end-to-end checks above pass on Windows Server 2022, against the installed `-setup.exe`. That runner is elevated (the app and the targets run with high privilege) and has no Google login, so real Google Docs is not tested; nothing has run on a personal Windows laptop.
   - macOS: compiles only in CI (a dependency needs Apple's SDK); the session logic tests run there. The app hasn't been launched.
 - **Restart isn't offered in "Into another app" mode.** The text already typed would be duplicated. Undo it in your document, then type again.
 - **Resume relies on the window keeping its caret.** Switching windows normally does this. If you click somewhere else in the document before resuming, typing continues from where you clicked.

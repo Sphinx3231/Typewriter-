@@ -1,11 +1,35 @@
 # Status
 
-_Last updated: 2026-10-17 (desktop-first release 1.1.0)_
+_Last updated: 2026-10-17 (1.1.1 on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## Windows desktop: "countdown, then nothing appears in Google Docs in Opera" (investigation, 2026-10-17)
+
+Reported from a real Windows PC with an unknown installed version: the status window counted down, then no text appeared in Google Docs in Opera. **Root cause: not found yet. Not reproduced.** Nothing below says it is fixed.
+
+**What the Windows code actually does** (read, not assumed):
+- Preparing is a no-op on Windows. The X11 keymap code is Linux-only (`cfg(target_os = "linux")`) and isn't compiled for Windows.
+- Keys go through enigo 0.6.1 `SendInput` with `KEYEVENTF_UNICODE` (Enter and Tab as real keys). When Windows accepts fewer events than sent (for example, UIPI blocking an elevated target), enigo returns an error. The session stops and reports it; nothing is swallowed. On Windows the error now includes the OS error code.
+- The target is whichever window has focus when the countdown ends (`GetForegroundWindow`). Before each key: a UI Automation password-field check, then the focused window is read again; a different window pauses typing.
+- One wait has no time limit: after the countdown, typing waits while Windows reports Ctrl, Alt, Shift or the Windows key as held (`GetAsyncKeyState`). It shows "Waiting for you to release Ctrl, Alt, Shift or Cmd." This is a candidate, not a proven cause.
+
+**Added to find it:** a typing-diagnostics log (Settings › About › **Copy typing diagnostics**; details in [`DESKTOP.md`](DESKTOP.md#typing-diagnostics)). It records each step with timings and error codes: Start, keyboard ready, focus changes, countdown, target, password-check time, held-key waits, first key sent and accepted, pauses, send errors, end. It also records the target's window class, keyboard-focus control, responsiveness and privilege level. It never records the text or window titles; a native test checks that. Settings › About also shows the version and the build (git commit), so a report can name the binary it came from.
+
+**Real Windows run (GitHub `windows-2022` runner, Desktop builds run 21, `b548244`):** the NSIS installer was built and installed silently. The **installed** app showed "Typewriter 1.1.1, Build b548244" in Settings. The same short text (`Hello from Typewriter 123.`, 6 s, mistakes off, 3 s countdown) was then typed into three targets:
+
+| Target | First key sent, after the target got focus (from the diagnostics) | Result | Notes from the diagnostics |
+|---|---|---|---|
+| Windows Notepad | 3.2 s (3 s countdown + 0.16 s) | completed, text exact | focus in `Edit`; password check 5 ms; first key accepted at once |
+| A plain text field in Opera 137 | 3.2 s | completed, text exact | focus in `Chrome_WidgetWin_1`; password check 48 ms |
+| A Docs-like page in Opera 137 (a local stand-in, **not Google Docs**) | 3.3 s | completed, text exact | password check 153 ms |
+
+The harness's own "first character after the click" figures (3 s, 1.1 s, 0 s) start their timer after it has checked the click, so they understate the delay; the diagnostics times above are the accurate ones. In all three, the countdown ended, a target was chosen and the first key was accepted by Windows. The same run also typed the tricky Unicode text exactly into a Docs-like page in Chrome, Edge and Opera.
+
+**What this does not cover:** real Google Docs (no Google login on the runner), your PC, and a non-elevated session. The runner runs everything with high privilege, so an elevation mismatch can't happen there. Next step: install the 1.1.1 build on the affected PC, reproduce, and send the copied diagnostics ([`MANUAL-QA.md`](MANUAL-QA.md) §1a).
 
 ## Critical fixes after 1.1.0 (2026-10-17, branch `ccr-e747ce8b-l498oo`, not merged)
 
@@ -25,13 +49,13 @@ Two bugs reported from real use. Both had a root cause in the code; neither was 
 | Suite | Command | Result |
 |---|---|---|
 | Typecheck | `npm run lint` | clean |
-| Unit | `npm test` | **223 passed** |
-| Native | `npm run test:native` | **all passed** (21 session tests, incl. preparation cut short, Stop before any key) |
+| Unit | `npm test` | **224 passed** |
+| Native | `npm run test:native` | **all passed** (24 session tests, incl. preparation cut short, Stop before any key, focus moving during the password check, the diagnostics never containing the text) |
 | Desktop end-to-end (X11) | `npx tauri build --no-bundle && npm run test:desktop` | **22 passed** |
 | Real Wayland | `npm run test:desktop:wayland` | **4 passed** |
 | Extension | `npm run test:extension` | **30 passed** (incl. the release build typing with nothing pre-granted) |
 | Extension, real browser UI | Chromium 141 on Xvfb, real toolbar clicks (xdotool), shipped `dist-extension` | side panel full UI on a fresh load and after a full restart; typed exactly into a page; Verified |
-| Windows end-to-end | `node e2e-desktop/windows.mjs` on GitHub `windows-2022` (Desktop builds workflow) | old app (run 12): **frozen**; fixed app (run 16, `bd403ed`): **6 passed** |
+| Windows end-to-end | `node e2e-desktop/windows.mjs` on GitHub `windows-2022` (Desktop builds workflow) | old app (run 12): **frozen**; fixed app (run 16, `bd403ed`): **6 passed**; installed 1.1.1 app (run 21, `b548244`): **all 14 passed**, including the three-target check above and Chrome/Edge/Opera |
 | Builds | Desktop builds run 17 (`25ae580`, version 1.1.1) | Linux, Windows, macOS installers and native tests: **success**. (Run 16's macOS job failed: a native test caught a key sent to a window that took focus during the password-field check; fixed by reading focus last, with a regression test.) |
 
 The Windows harness runs the real `typewriter.exe` through tauri-driver and plays the user with real `SendInput` clicks and shortcut presses; the target is a native WinForms text box. Screenshots are in the run's `windows-e2e-screenshots` artifact.
