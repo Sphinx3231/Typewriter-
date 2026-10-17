@@ -22,12 +22,42 @@ fn stop_shortcut() -> Shortcut {
 #[derive(Default)]
 struct AppState {
     control: Mutex<Option<Control>>,
+    /// Typing threads that may still be running or restoring the keymap.
+    workers: Mutex<Vec<std::thread::JoinHandle<String>>>,
+    /// Set once the typing threads have been waited for, so the final exit can proceed.
+    cleaned_up: std::sync::atomic::AtomicBool,
+}
+
+/// Longest the app waits on exit for typing threads to stop and clean up (on X11,
+/// removing temporary key bindings takes up to a few seconds).
+const EXIT_GRACE: Duration = Duration::from_secs(10);
+
+/// Stops any session and waits (bounded) for every typing thread to finish, so
+/// nothing is left behind in the user's keymap when the process exits. Runs off the
+/// main thread: the typing thread's last steps (status event, shortcut removal) may
+/// need the event loop, so blocking the loop here could deadlock.
+fn finish_sessions(app: &AppHandle) {
+    stop_session(app);
+    let workers = std::mem::take(&mut *app.state::<AppState>().workers.lock().unwrap());
+    let deadline = std::time::Instant::now() + EXIT_GRACE;
+    for w in workers {
+        while !w.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if w.is_finished() {
+            let _ = w.join();
+        }
+    }
 }
 
 fn stop_session(app: &AppHandle) {
     if let Some(c) = app.state::<AppState>().control.lock().unwrap().as_ref() {
         c.send(Command::Stop);
     }
+}
+
+fn workers_running(app: &AppHandle) -> bool {
+    app.state::<AppState>().workers.lock().unwrap().iter().any(|w| !w.is_finished())
 }
 
 #[tauri::command]
@@ -73,7 +103,7 @@ fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimiz
 
     let cfg = Config { events, countdown_ms, resume_countdown_ms: 3000, own_pid: std::process::id() as u64 };
     let handle = app.clone();
-    let (control, _join) = spawn_session(cfg, move |update| {
+    let (control, worker) = spawn_session(cfg, move |update| {
         let done = matches!(update.phase.as_str(), "completed" | "stopped" | "failed");
         let _ = handle.emit("external://update", UpdateEvent { update: &update, shortcut_registered });
         if done {
@@ -93,6 +123,12 @@ fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimiz
     })
     .map_err(|s| serde_json::to_string(&s).unwrap_or(s.message))?;
     *app.state::<AppState>().control.lock().unwrap() = Some(control);
+    {
+        let state = app.state::<AppState>();
+        let mut workers = state.workers.lock().unwrap();
+        workers.retain(|w| !w.is_finished());
+        workers.push(worker);
+    }
     Ok(StartResult { shortcut_registered })
 }
 
@@ -191,6 +227,22 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Typewriter");
+        .build(tauri::generate_context!())
+        .expect("error while building Typewriter")
+        .run(|app, event| {
+            // Before the process ends, let typing threads stop and restore the keymap.
+            // The exit is postponed (not blocked) and resumed once they are done.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let state = app.state::<AppState>();
+                if !state.cleaned_up.load(std::sync::atomic::Ordering::SeqCst) && workers_running(app) {
+                    api.prevent_exit();
+                    let h = app.clone();
+                    std::thread::spawn(move || {
+                        finish_sessions(&h);
+                        h.state::<AppState>().cleaned_up.store(true, std::sync::atomic::Ordering::SeqCst);
+                        h.exit(0);
+                    });
+                }
+            }
+        });
 }

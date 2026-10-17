@@ -39,7 +39,7 @@ Keep Tauri 2 and the existing architecture. It is small (about 6 MB binary, 3.4 
 | Gap | Result |
 |---|---|
 | G1 Wayland | Fixed: detected via `WAYLAND_DISPLAY`/`XDG_SESSION_TYPE` and explained; native unit tests plus an end-to-end check with the real app. |
-| G2 Text on quit | Fixed: confirmation dialog; the session stops only when the window is really destroyed. End-to-end: keep open, and quit mid-typing. |
+| G2 Text on quit | Fixed: confirmation dialog; the session stops only when the window is really destroyed. End-to-end: keep open, and quit mid-session (see the final review below for a cleanup defect found afterwards). |
 | G3 Status window | Fixed: Pause/Resume/Stop, real shortcut state, percent and time left, full-height layout. End-to-end with real mouse clicks. |
 | G4 Palette | Done: light theme is white/blue/purple; spec amendment recorded. |
 | G5 Contrast | Done: automated WCAG test. It found and fixed 5 failing pairs, including the dark Stop button. |
@@ -47,3 +47,18 @@ Keep Tauri 2 and the existing architecture. It is small (about 6 MB binary, 3.4 
 | G7 Source after interruptions | Done: asserted after stop, failsafe, Stop in the status window and quitting. |
 | New: Linux keymap races | Found while testing G6: overlapping sessions mixed up characters; pre-binding control characters typed Tabs; the readiness check failed while key codes were in use. All fixed with regression checks (one proven by a mutant that reintroduces the bug). |
 | G8, G9 | Still open, and documented: Windows/macOS real input, Google Docs and other real apps. |
+
+## Final review (independent reviewer + verification)
+
+A reviewer with no build context read `origin/main..743e599`. Each finding below was then checked by running the code.
+
+| Finding | Severity | Verified how | Outcome |
+|---|---|---|---|
+| Quitting mid-session killed the typing thread before it removed its temporary key bindings (`src-tauri/src/lib.rs` exit path, `xtyper.rs` `Drop`) | Medium | The strengthened quit check found 日 語 中 文 한 국 어 → ∞ left in the X keymap after quitting the 743e599 build. | **Fixed:** exit is postponed (not blocked: a first attempt that blocked the event loop deadlocked) until typing threads finish, up to 10 s. The check passes 3/3 on the fix and fails on 743e599. |
+| The quit end-to-end check couldn't detect a session that kept running (focusing Typewriter pauses typing anyway) | Medium | Reading the check | **Fixed:** it now waits for the process to exit and asserts every temporary key binding is gone. |
+| Stop and failsafe ignored while a session prepares (pre-binding up to ~3 s) | Low | Reading the code | **Fixed:** preparation stops as soon as Stop is requested; a native test fails if Stop waits for it. A new session can still wait up to ~3 s on the keymap lock while the previous one restores. |
+| A failed keymap change can leave one code bound (`xtyper.rs` `remap`) | Low | Reading the code; only reachable when the X connection is already broken | Not fixed (theoretical). |
+| Docs overclaimed: "unchanged after every interruption", "two codes always left free", "bound before the countdown ends" | Low | Compared with the tests and code | Corrected. |
+| The back-to-back regression was described as a 1.0.0 bug | Low | The real 1.0.0 build (548966c) passes that check 3/3 | Corrected: the race became reachable through this release's slower cleanup; the check guards the current design. |
+| The Wayland test didn't prove GTK used Wayland, or that the native side refuses | Low | Reading the test | **Fixed:** it asserts Typewriter has no X11 window (fails when GTK is forced to X11) and that a direct `external_start` call is refused with state `wayland`. |
+

@@ -37,6 +37,10 @@ impl Control {
             *slot = Some(c);
         }
     }
+    /// True once Stop has been requested (without consuming it).
+    pub fn stop_requested(&self) -> bool {
+        *self.0.lock().unwrap() == Some(Command::Stop)
+    }
     fn take(&self) -> Option<Command> {
         self.0.lock().unwrap().take()
     }
@@ -141,8 +145,10 @@ impl<D: Desktop> Session<D> {
         }
         // Let the backend prepare for every character up front (on X11: bind the ones
         // that aren't on the keyboard layout), well before the first key is due.
+        // Preparing can take a moment, so it gives up as soon as Stop is requested.
         let chars = session_chars(&self.cfg.events);
-        self.desktop.prepare(&chars);
+        let control = self.control.clone();
+        self.desktop.prepare(&chars, &|| control.stop_requested());
         match self.wait_and_count_down() {
             Flow::End => return "stopped".into(),
             Flow::Continue => {}

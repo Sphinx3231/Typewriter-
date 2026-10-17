@@ -34,7 +34,8 @@ pub trait Desktop {
     fn send(&mut self, action: &KeyAction) -> Result<(), String>;
     /// Called once with every character the session will type, before the
     /// countdown, so the backend can set up whatever those characters need.
-    fn prepare(&mut self, _chars: &[char]) {}
+    /// It should return early once `cancelled()` is true (Stop was requested).
+    fn prepare(&mut self, _chars: &[char], _cancelled: &dyn Fn() -> bool) {}
 }
 
 /// Window titles that suggest a login or password manager. Typing is refused there.
@@ -204,13 +205,13 @@ impl Desktop for RealDesktop {
         matches!(self.enigo.as_ref().map(|e| e.location()), Some(Ok((x, y))) if x <= 1 && y <= 1)
     }
 
-    fn prepare(&mut self, chars: &[char]) {
+    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
         #[cfg(target_os = "linux")]
         if let Some(t) = self.typer.as_mut() {
-            t.prebind(chars);
+            t.prebind(chars, cancelled);
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = chars;
+        let _ = (chars, cancelled);
     }
 
     fn send(&mut self, action: &KeyAction) -> Result<(), String> {

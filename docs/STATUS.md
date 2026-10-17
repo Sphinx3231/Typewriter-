@@ -27,7 +27,7 @@ The standalone desktop app is the primary product. The Chrome extension stays in
   - Emergency stop: Ctrl+Shift+Space, the mouse corner, or Stop.
   - Status window with progress, time left and Pause/Resume/Stop.
   - "Sent, not checked" until **Check copied text** confirms the document.
-- **Interruptions:** the source text is unchanged after stop, failsafe and failure. Quitting asks first when text would be lost or typing is running.
+- **Interruptions:** the end-to-end checks confirm the source text is unchanged after the emergency stop, the mouse-corner stop and Stop in the status window, and after choosing "Keep Typewriter open". Quitting asks first when text would be lost or typing is running, and quitting mid-session removes every temporary key binding before the app exits.
 - **Wayland:** detected even under XWayland and explained; typing into other apps isn't offered there. Tested with the real app as a Wayland client under Weston + XWayland.
 - **Themes:**
   - Light: white, blue and purple. Dark: black, red and orange.
@@ -38,10 +38,11 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 
 | Problem | Effect | Fix |
 |---|---|---|
-| Two sessions overlapping on Linux | A new session could mistake the previous session's temporary key binding for a real key: wrong characters (`‘` for `文`). | A keymap lock: a session can't read the keymap until the previous one has restored it. A regression check fails without the lock (2/2) and passes with it (3/3). |
-| Tab and newline pre-bound as symbols | Wasted key codes; a reused code typed a Tab. | Control characters are skipped. |
-| Readiness check used enigo | While a Unicode-heavy session held every free key code, the next start said "Keyboard input isn't available". | Linux checks X11 + XTest directly; enigo is only a fallback. Two key codes are always left free. |
-| No settle time after remapping a key code | Rarely, a character was read with the code's previous symbol. | 80 ms settle after each remap; symbols are bound before the countdown ends. |
+| No settle time after remapping a key code (**present in 1.0.0**) | Rarely, a character arrived as the code's previous symbol (`”` for `👍`), seen once with 1.0.0's typing code. | 80 ms settle after each remap; off-layout symbols are bound before the countdown starts. |
+| Two sessions overlapping on Linux (*made reachable during this release*) | Once cleanup got slower in this release, a new session could mistake the previous session's temporary binding for a real key (`‘` for `文`). The real 1.0.0 build passes the same test 3/3: its window for this race was about 250 ms. | A keymap lock: a session can't read the keymap until the previous one has restored it. The regression check fails without the lock (2/2) and passes with it. |
+| Tab and newline pre-bound as symbols (*introduced and fixed in this release*) | Wasted key codes; a reused code typed a Tab. | Control characters are skipped. |
+| Readiness check used enigo (*made reachable during this release*) | While a Unicode-heavy session held the free key codes, the next start said "Keyboard input isn't available". | Linux checks X11 + XTest directly; enigo is only a fallback. Two codes are left free when the pool has at least 3. |
+| Quitting left temporary key bindings behind (*found in the final code review*) | Quitting mid-session killed the typing thread before it removed its bindings (e.g. 日 語 中 文 stayed in the X keymap until the X server restarted). | The app postpones its exit until typing threads have stopped and restored the keymap (up to 10 s). Preparing a session also stops as soon as Stop is pressed. The quit check fails on the previous build and passes on this one (3/3). |
 | Wayland under XWayland reported "Ready" | Typing then waited forever or failed. | Detected and explained up front. |
 | Quitting discarded unsaved text silently | Text lost. | Confirmation dialog: keep open / save text and quit / quit. |
 | Status window | No Pause; a dead shortcut hint if registration failed; no time left. | Redesigned; it reflects the real shortcut state. |

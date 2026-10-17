@@ -7,7 +7,7 @@
  * Usage: node e2e-desktop/wayland.mjs [path/to/typewriter-binary]
  * Needs: weston (with Xwayland), tauri-driver, WebKitWebDriver (Linux).
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -91,10 +91,18 @@ async function main() {
   sid = (await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": { application: APP } } } })).sessionId;
   await until(() => js(`return !!document.querySelector('[data-testid="btn-start"]') && !document.getElementById("boot")`), 30000, "Typewriter's UI");
 
-  await check("runs as a native Wayland client (GDK Wayland backend, XWayland display also present)", async () => {
+  await check("runs as a native Wayland client (no X11 window, although XWayland is available)", async () => {
     const wl = readFileSync(log, "utf8");
     assert(/xserver listening on display/.test(wl), "XWayland didn't start");
     assert(await js(`return !!document.querySelector(".logo-mark__art")`), "UI didn't render");
+    // A Wayland-native window is invisible to XWayland; an X11 fallback would be listed there.
+    let x11 = "";
+    try {
+      x11 = execFileSync("xdotool", ["search", "--name", "Typewriter"], { env: { ...process.env, DISPLAY: display } }).toString().trim();
+    } catch {
+      x11 = ""; // xdotool exits 1 when nothing matches
+    }
+    assert(x11 === "", `Typewriter has X11 windows (${x11}): it fell back to XWayland instead of running on Wayland`);
   });
 
   await check("typing into other apps is refused with an explanation, and Start stays disabled", async () => {
@@ -105,6 +113,27 @@ async function main() {
     }, 8000, "the support message");
     assert(/Wayland/.test(msg) && /Xorg/.test(msg), `message: ${msg}`);
     assert(await js(`return document.querySelector('[data-testid="btn-start"]').disabled`), "Start is enabled");
+  });
+
+  await check("the native side refuses too: a direct external_start call is rejected (the UI can't be bypassed)", async () => {
+    // WebKitWebDriver may report the command's rejection as a script error rather
+    // than passing it to the callback; either way the refusal payload is the Support JSON.
+    let r;
+    try {
+      r = await wd("POST", `/session/${sid}/execute/async`, {
+        script: `const done = arguments[arguments.length - 1];
+          window.__TAURI_INTERNALS__.invoke("external_start", { events: [{ kind: "type", at: 10, text: "x" }], countdownMs: 2000, minimize: false })
+            .then(() => done({ started: true }), (e) => done({ started: false, error: String(e) }));`,
+        args: [],
+      });
+    } catch (e) {
+      const m = String(e.message).match(/\{"available".*\}/);
+      assert(m, `unexpected WebDriver error: ${e.message}`);
+      r = { started: false, error: m[0] };
+    }
+    assert(r && r.started === false, `external_start was accepted: ${JSON.stringify(r)}`);
+    const support = JSON.parse(r.error);
+    assert(support.state === "wayland" && support.available === false, `refused for the wrong reason: ${r.error}`);
   });
 
   await check("the in-app preview still works and reproduces the text exactly", async () => {

@@ -82,7 +82,7 @@ If the emergency shortcut couldn't be registered (another app may own it), the w
   - All systems: window titles such as "Sign in" or "Password" are refused.
 - **Shortcuts can't fire by accident.** If you hold Ctrl, Alt, Shift or Cmd, it waits until you let go.
 - **Your text is only ever typed as literal characters.** It is never run, and never sent anywhere.
-- **Your text isn't lost when you quit.** If the text isn't saved ("Remember my text" is off), or a session is running, closing the window asks first. You can keep Typewriter open, save the text and quit, or quit anyway. Quitting stops typing at once.
+- **Your text isn't lost when you quit.** If the text isn't saved ("Remember my text" is off), or a session is running, closing the window asks first. You can keep Typewriter open, save the text and quit, or quit anyway. Clicking Typewriter to close it already pauses typing (focus left your document); quitting then ends the session and removes Typewriter's temporary key bindings before the app exits.
 
 ### Checking the result
 
@@ -133,10 +133,10 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
 5. **Platform backends:**
    - **Linux (X11):** keys go straight through XTest, about 0.03 ms per character.
      - Caps Lock is handled.
-     - Characters that aren't on your keyboard layout (emoji, CJK, curly quotes…) are bound to unused key codes before the countdown ends. The app being typed into gets time to pick up each change.
+     - Characters that aren't on your keyboard layout (emoji, CJK, curly quotes…) are bound to unused key codes before the countdown starts. The app being typed into gets time to pick up each change. Pressing Stop cancels this preparation at once.
      - One session at a time may change the keymap, so a new session can never mistake a previous session's temporary binding for a real key.
-     - Two unused key codes are always left free for other programs.
-     - When the session ends, every binding is removed again.
+     - Two unused key codes are left free for other programs (when the keyboard map has at least three).
+     - When the session ends, every binding is removed again, including when you quit mid-session: the app waits (up to 10 s) for this before exiting.
    - **Windows and macOS:** keys go through `enigo` (MIT).
 
 ---
@@ -162,10 +162,10 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
   - pause on focus change; Ctrl+Shift+Space; mouse corner; login-window refusal;
   - status-window controls clicked with the mouse;
   - in-app preview;
-  - quit protection (keep, and quit mid-typing);
+  - quit protection (keep open; quitting mid-session removes every temporary key binding before the process exits);
   - Wayland refusal.
 
-  After every interruption it checks that the source text is unchanged.
+  After the emergency stop, the mouse-corner stop, Stop in the status window and "Keep Typewriter open", it checks that the source text is unchanged.
 - **Real Wayland session (`npm run test:desktop:wayland`):** the packaged app runs as a native Wayland client under headless Weston with XWayland. It checks that typing into other apps is refused with the explanation, and that the preview reproduces Unicode text exactly. Needs `weston` and `Xwayland`.
 
 ---

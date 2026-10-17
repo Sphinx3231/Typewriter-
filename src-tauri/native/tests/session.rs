@@ -24,6 +24,8 @@ struct State {
     keys_sent: usize,
     first_key_at: Option<Instant>,
     prepared: Option<(Vec<char>, usize)>,
+    /// Simulates a slow backend: prepare() keeps working until it is cancelled (or 5 s pass).
+    slow_prepare: bool,
 }
 
 #[derive(Clone, Default)]
@@ -54,10 +56,17 @@ impl Desktop for Fake {
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
     }
-    fn prepare(&mut self, chars: &[char]) {
-        let mut s = self.0.lock().unwrap();
-        let sent = s.keys_sent;
-        s.prepared = Some((chars.to_vec(), sent));
+    fn prepare(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
+        let slow = {
+            let mut s = self.0.lock().unwrap();
+            let sent = s.keys_sent;
+            s.prepared = Some((chars.to_vec(), sent));
+            s.slow_prepare
+        };
+        let t0 = Instant::now();
+        while slow && !cancelled() && t0.elapsed() < Duration::from_secs(5) {
+            thread::sleep(Duration::from_millis(5));
+        }
     }
     fn send(&mut self, a: &KeyAction) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
@@ -136,6 +145,20 @@ fn the_backend_is_prepared_with_every_character_before_any_key() {
     let (chars, keys_before) = fake.0.lock().unwrap().prepared.clone().expect("prepare was called");
     assert_eq!(keys_before, 0, "keys were sent before preparing");
     assert_eq!(chars, vec!['a', '👍', '🏽', '“']);
+}
+
+#[test]
+fn stop_during_a_slow_prepare_ends_the_session_promptly_without_typing() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().slow_prepare = true;
+    fake.focus(win("doc", 42, "Doc"));
+    let r = start(&fake, events_for("never typed", 5.0), 50);
+    thread::sleep(Duration::from_millis(100));
+    let stopped_at = Instant::now();
+    r.control.send(Command::Stop);
+    assert_eq!(r.handle.join().unwrap(), "stopped");
+    assert!(stopped_at.elapsed() < Duration::from_millis(500), "Stop waited for prepare to finish");
+    assert_eq!(fake.keys(), 0);
 }
 
 #[test]

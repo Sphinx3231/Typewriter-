@@ -151,9 +151,9 @@ impl XTyper {
     /// as many as there are spare codes, so typing normally never remaps mid-session.
     /// One change at a time, each given time to settle: apps that see a burst of
     /// keymap changes can miss some of them.
-    pub fn prebind(&mut self, chars: &[char]) {
+    pub fn prebind(&mut self, chars: &[char], cancelled: &dyn Fn() -> bool) {
         for &c in chars {
-            if self.bound.len() >= self.spare.len() {
+            if cancelled() || self.bound.len() >= self.spare.len() {
                 break;
             }
             // Line breaks and tabs are sent as their own keys, never as symbols.

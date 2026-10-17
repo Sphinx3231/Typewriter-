@@ -160,6 +160,12 @@ async function prepare(text, { seconds, mistakes = "Medium", minimize = true, co
   await sleep(500);
 }
 const state = () => ui(`__tw.state()`);
+/** Which of these characters currently have a key binding in the X keymap (read with xkbcomp). */
+function boundKeysyms(chars) {
+  const map = execFileSync("xkbcomp", ["-xkb", DISPLAY, "-"], { env, stdio: ["ignore", "pipe", "ignore"] }).toString();
+  const symbols = map.slice(map.indexOf("xkb_symbols"));
+  return chars.filter((c) => new RegExp(`\\bU${c.codePointAt(0).toString(16).toUpperCase()}\\b`, "i").test(symbols));
+}
 const editorText = () => ui(`document.getElementById("source-text").value`);
 
 /** Runs a script in the status window (HUD), then switches WebDriver back to the main window. */
@@ -613,15 +619,22 @@ async function main() {
     await mainWindow(); // still running
   });
 
-  await check("quitting mid-typing asks, then stops typing at once and exits", async () => {
+  await check("quitting mid-session asks, ends the session, restores the keymap and exits", async () => {
     await resetDoc();
-    await prepare("z".repeat(400), { seconds: 30, mistakes: "Off", minimize: false, countdown: 2 });
+    // Off-layout characters get temporary key bindings when the session starts; quitting
+    // must still remove every one of them (the typing thread must finish its cleanup).
+    const special = [..."日本語中文한국어→≈∞🚀"];
+    await prepare(special.join("") + " " + "z".repeat(400), { seconds: 40, mistakes: "Off", minimize: false, countdown: 2 });
     await ui(`(__tw.click("btn-start"), 1)`);
     await sleep(300);
     await focusDoc();
-    await until(async () => (await docValue()).length > 5, 10000, "typing");
+    await until(async () => (await docValue()).length > 5, 15000, "typing");
+    const boundNow = boundKeysyms(special);
+    assert(boundNow.length > 0, "precondition: the session should have bound off-layout characters");
+    // Clicking Typewriter to close it moves focus there, which already pauses typing; quitting must end the session.
     const id = await mainWindow();
-    xdo("windowactivate", "--sync", id); // Typewriter takes focus: typing pauses
+    const appPid = xdo("getwindowpid", id);
+    xdo("windowactivate", "--sync", id);
     xdo("key", "--clearmodifiers", "alt+F4");
     await until(() => ui(`!!document.querySelector('[data-testid="quit-dialog"]')?.open`), 5000, "quit confirmation");
     assert(await ui(`!!document.querySelector('[data-testid="quit-running"]')`), "no running-session warning");
@@ -633,10 +646,14 @@ async function main() {
       } catch {
         return true;
       }
-    }, 8000, "Typewriter windows to close");
+    }, 15000, "Typewriter windows to close");
+    // The process stays only as long as it needs to stop typing and restore the keymap.
+    await until(() => !existsSync(`/proc/${appPid}`), 15000, "the Typewriter process to exit");
     const n = (await docValue()).length;
-    await sleep(1500);
+    await sleep(1000);
     assert((await docValue()).length === n && n < 400, "typing continued after quitting");
+    const left = boundKeysyms(special);
+    assert(left.length === 0, `temporary key bindings left in the keymap after quitting: ${left.join(" ")}`);
     sid = null;
   });
 
