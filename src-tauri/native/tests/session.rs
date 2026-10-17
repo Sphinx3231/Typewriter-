@@ -184,18 +184,20 @@ fn counts_down_then_types_into_the_target_only() {
 fn returning_to_typewriter_during_countdown_restarts_it() {
     let fake = Fake::default();
     fake.focus(win("tw", OWN, "Typewriter"));
-    let r = start(&fake, events_for("abc", 2.0), 200);
+    // A long countdown so a slow CI runner can't let it run out before the test returns to Typewriter.
+    let r = start(&fake, events_for("abc", 2.0), 1000);
     thread::sleep(Duration::from_millis(30));
     fake.focus(win("doc", 42, "Doc"));
-    thread::sleep(Duration::from_millis(120));
+    assert!(wait_for_phase(&r, "countdown", 900), "the countdown didn't start");
     fake.focus(win("tw", OWN, "Typewriter"));
-    thread::sleep(Duration::from_millis(150));
+    // Past the original countdown's end: nothing may have been typed.
+    thread::sleep(Duration::from_millis(1100));
     assert_eq!(fake.keys(), 0);
     let back = Instant::now();
     fake.focus(win("doc", 42, "Doc"));
     assert_eq!(r.handle.join().unwrap(), "completed");
     let first = fake.0.lock().unwrap().first_key_at.unwrap();
-    assert!(first.duration_since(back) >= Duration::from_millis(190));
+    assert!(first.duration_since(back) >= Duration::from_millis(990), "the countdown didn't start over");
     assert_eq!(fake.text("doc"), "abc");
 }
 
@@ -229,7 +231,8 @@ fn user_pause_and_resume() {
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));
     let text = "user pause check, nothing lost";
-    let r = start(&fake, events_for(text, 6.0), 10);
+    // 600 ms of typing, so the Pause at ~80 ms still lands mid-session on a slow CI runner.
+    let r = start(&fake, events_for(text, 20.0), 10);
     thread::sleep(Duration::from_millis(80));
     r.control.send(Command::Pause);
     assert!(wait_for_phase(&r, "paused", 300));
