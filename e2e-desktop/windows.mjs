@@ -6,6 +6,10 @@
  *   e2e-desktop/win/target.ps1    the destination: a native Win32 text box that saves its text
  *   e2e-desktop/win/input.ps1     the user's real mouse clicks and shortcut presses, and screenshots
  *
+ * It then types into real Chromium browsers (Chrome, Edge, and Opera when installed) on a
+ * page that takes input the way Google Docs does (e2e-extension/fixtures/strict-editor.html),
+ * reading the result over the DevTools protocol.
+ *
  * Nothing in Typewriter's input path is mocked.
  *
  * Usage: node e2e-desktop/windows.mjs [path\to\typewriter.exe]
@@ -178,7 +182,7 @@ async function openTarget(key, title, x, y) {
     throw new Error(`${e.message}\n    target.ps1 output: ${log.join("").trim() || "(none)"}`);
   });
   const [rx, ry, rw, rh] = rect.split(" ").map(Number);
-  targets[key] = { out, title, x: rx, y: ry, w: rw, h: rh };
+  targets[key] = { out, title, x: rx, y: ry, w: rw, h: rh, proc: p };
 }
 const read = (key) => readFileSync(targets[key].out, "utf8").replace(/\r\n/g, "\n");
 async function clear(key) {
@@ -243,6 +247,97 @@ const TRICKY = [
   "",
   "Last line with trailing spaces.   ",
 ].join("\n");
+
+
+// ---------------------------------------------------------------- real browsers
+const STRICT = resolve(here, "../e2e-extension/fixtures/strict-editor.html");
+const BROWSERS = [
+  ["Chrome", ["C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"]],
+  ["Edge", ["C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"]],
+  [
+    "Opera",
+    [join(process.env.LOCALAPPDATA ?? "", "Programs\\Opera\\opera.exe"), "C:\\Program Files\\Opera\\opera.exe", "C:\\Program Files (x86)\\Opera\\opera.exe"],
+  ],
+];
+/** Evaluates an expression in the browser page whose URL contains `urlPart`. */
+async function cdpEval(port, urlPart, expression) {
+  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+  const t = list.find((x) => x.type === "page" && x.url.includes(urlPart));
+  if (!t) throw new Error(`no page with ${urlPart} (pages: ${list.map((x) => x.url).join(", ")})`);
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise((ok, fail) => ((ws.onopen = ok), (ws.onerror = () => fail(new Error("DevTools connection failed")))));
+  try {
+    const res = await new Promise((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error("DevTools didn't answer")), 5000);
+      ws.onmessage = (m) => {
+        const d = JSON.parse(m.data);
+        if (d.id === 1) (clearTimeout(timer), ok(d));
+      };
+      ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true } }));
+    });
+    if (res.result?.exceptionDetails) throw new Error(res.result.exceptionDetails.text);
+    return res.result?.result?.value;
+  } finally {
+    ws.close();
+  }
+}
+async function browserCheck(name, exe, port) {
+  const profile = mkdtempSync(join(tmpdir(), `tw-${name}-`));
+  const p = spawn(
+    exe,
+    [
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${port}`,
+      "--remote-allow-origins=*",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-features=Translate",
+      "--window-position=60,40",
+      "--window-size=960,640",
+      "--new-window",
+      `file:///${STRICT.replace(/\\/g, "/")}`,
+    ],
+    { stdio: "ignore" },
+  );
+  procs.push(p);
+  try {
+    await until(() => cdpEval(port, "strict-editor", "typeof modelText === 'function'"), 30000, `${name} to load the page`);
+    await configure(TRICKY, { seconds: 20, mistakes: "Medium" });
+    await start();
+    // A real click on the page's canvas, like clicking into a Google Docs page.
+    const [cx, cy] = await cdpEval(
+      port,
+      "strict-editor",
+      `(() => { const r = document.getElementById("page").getBoundingClientRect(), k = devicePixelRatio;
+        const bx = (outerWidth - innerWidth) / 2, by = outerHeight - innerHeight - bx;
+        return [Math.round((screenX + bx + r.left + 120) * k), Math.round((screenY + by + r.top + 60) * k)]; })()`,
+    );
+    const hidden = ps("input.ps1", "hideconsoles");
+    if (hidden) console.log(`    ${hidden.split("\n").join("\n    ")}`);
+    ps("input.ps1", "click", cx, cy);
+    await until(async () => /Strict editor/.test(ps("input.ps1", "fg")), 3000, `${name} to have focus after the click`).catch((e) => {
+      throw new Error(`${e.message}; the click chose "${ps("input.ps1", "fg")}" instead`);
+    });
+    const t0 = Date.now();
+    await until(async () => (await cdpEval(port, "strict-editor", "modelText()")).length > 0, 20000, `the first character to arrive in ${name}`);
+    console.log(`    first character arrived ${((Date.now() - t0) / 1000).toFixed(1)} s after the click (countdown 3 s)`);
+    shot(`win-browser-${name.toLowerCase()}-typing`);
+    await until(async () => (await hudPhase()) === "completed", 90000, "the session to complete");
+    await sleep(500);
+    shot(`win-browser-${name.toLowerCase()}-completed`);
+    const got = await cdpEval(port, "strict-editor", "modelText()");
+    const rejected = await cdpEval(port, "strict-editor", "model.rejected");
+    assert(rejected === 0, `${name} received ${rejected} untrusted (script-made) events`);
+    assert(got === TRICKY, `final text in ${name} differs.\n    want ${JSON.stringify(TRICKY)}\n    got  ${JSON.stringify(got)}`);
+  } finally {
+    p.kill();
+    try {
+      execFileSync("taskkill", ["/PID", String(p.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      /* already gone */
+    }
+  }
+}
 
 // ---------------------------------------------------------------- run
 async function main() {
@@ -349,6 +444,18 @@ async function main() {
     assert(read("doc") === atStop, "text kept arriving after the emergency stop");
     shot("win-07-emergency-stop");
   });
+
+  // The native text windows stay on top; close them so the browser windows can be clicked.
+  for (const t of Object.values(targets)) t.proc.kill();
+  let port = 9555;
+  for (const [name, paths] of BROWSERS) {
+    const exe = paths.find((x) => existsSync(x));
+    if (!exe) {
+      console.log(`  - types into ${name}: skipped, ${name} isn't installed`);
+      continue;
+    }
+    await check(`types into a Google-Docs-like page in ${name}, exactly`, () => browserCheck(name, exe, port++));
+  }
 
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
 }

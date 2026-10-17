@@ -82,6 +82,9 @@ jobs:
           cargo install --git https://github.com/chippers/msedgedriver-tool
           & "$HOME/.cargo/bin/msedgedriver-tool.exe"
           $PWD.Path >> $env:GITHUB_PATH
+      - name: Install Opera (best effort; Chrome and Edge are preinstalled)
+        continue-on-error: true
+        run: choco install opera -y --no-progress
       - name: Windows end-to-end
         env:
           SHOTS: e2e-shots
