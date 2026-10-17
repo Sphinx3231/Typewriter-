@@ -9,6 +9,8 @@ $form.Text = $Title
 $form.StartPosition = "Manual"
 $form.Location = New-Object System.Drawing.Point($X, $Y)
 $form.Size = New-Object System.Drawing.Size(560, 420)
+# Stay above other windows (a console on the CI runner can otherwise cover the text box).
+$form.TopMost = $true
 $tb = New-Object System.Windows.Forms.TextBox
 $tb.Multiline = $true
 $tb.AcceptsReturn = $true

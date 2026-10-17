@@ -4,6 +4,8 @@
 #   input.ps1 shot FILE.png    captures the whole primary screen
 #   input.ps1 fg               prints the title of the foreground window
 #   input.ps1 find TITLE       prints "x y w h" of the visible top-level window with that exact title
+#   input.ps1 hideconsoles     minimizes visible console windows (on the CI runner a stray
+#                              msedgewebview2.exe console can sit on top of the target windows)
 param([Parameter(Mandatory = $true)][string]$Cmd, [string]$A, [string]$B)
 Add-Type @"
 using System;
@@ -18,6 +20,8 @@ public static class TwInput {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -50,6 +54,17 @@ switch ($Cmd) {
     $s = New-Object System.Text.StringBuilder 512
     [TwInput]::GetWindowText([TwInput]::GetForegroundWindow(), $s, 512) | Out-Null
     $s.ToString()
+  }
+  "hideconsoles" {
+    $h = [IntPtr]::Zero
+    while (($h = [TwInput]::FindWindowEx([IntPtr]::Zero, $h, "ConsoleWindowClass", [NullString]::Value)) -ne [IntPtr]::Zero) {
+      if ([TwInput]::IsWindowVisible($h)) {
+        $s = New-Object System.Text.StringBuilder 512
+        [TwInput]::GetWindowText($h, $s, 512) | Out-Null
+        [TwInput]::ShowWindow($h, 6) | Out-Null
+        "minimized console: $($s.ToString())"
+      }
+    }
   }
   "find" {
     # [NullString]: PowerShell would pass $null as "" (no window has class ""), and find nothing.

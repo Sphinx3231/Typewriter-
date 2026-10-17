@@ -186,9 +186,15 @@ async function clear(key) {
   await until(async () => !existsSync(`${targets[key].out}.clear`) && read(key) === "", 5000, `${key} to clear`);
 }
 /** A real click inside the target's text box, near the bottom so the caret lands at the end. */
-function clickInto(key) {
+async function clickInto(key) {
   const t = targets[key];
+  const hidden = ps("input.ps1", "hideconsoles");
+  if (hidden) console.log(`    ${hidden.split("\n").join("\n    ")}`);
   ps("input.ps1", "click", Math.round(t.x + t.w / 2), Math.round(t.y + t.h - 60));
+  // The test is only meaningful if the click really chose the target window.
+  await until(async () => ps("input.ps1", "fg") === t.title, 3000, `the "${t.title}" window to have focus after the click`).catch((e) => {
+    throw new Error(`${e.message}; the click chose "${ps("input.ps1", "fg")}" instead`);
+  });
 }
 
 // ---------------------------------------------------------------- sessions
@@ -277,7 +283,7 @@ async function main() {
     await clear("doc");
     await configure(TRICKY, { seconds: 20, mistakes: "Medium" });
     await start();
-    clickInto("doc");
+    await clickInto("doc");
     await until(async () => (await hudPhase()) === "typing", 15000, "typing to begin");
     await until(async () => read("doc").length > 20, 15000, "characters to arrive in the target");
     shot("win-03-typing");
@@ -293,7 +299,7 @@ async function main() {
     const text = "Pause and resume on Windows: nothing lost, nothing repeated. ".repeat(3).trim();
     await configure(text, { seconds: 14, mistakes: "Off" });
     await start();
-    clickInto("doc");
+    await clickInto("doc");
     await until(async () => read("doc").length > 15, 20000, "typing to begin");
     await hudClick("hud-pause");
     await until(async () => (await hudPhase()) === "paused", 5000, "paused");
@@ -303,7 +309,7 @@ async function main() {
     shot("win-05-paused");
     await hudClick("hud-resume");
     await sleep(500);
-    clickInto("doc");
+    await clickInto("doc");
     await until(async () => (await hudPhase()) === "completed", 60000, "the session to complete after resuming");
     await sleep(400);
     assert(read("doc") === text, `final text differs after pause/resume: ${JSON.stringify(read("doc"))}`);
@@ -314,9 +320,9 @@ async function main() {
     await clear("other");
     await configure("Focus check. ".repeat(12).trim(), { seconds: 12, mistakes: "Off" });
     await start();
-    clickInto("doc");
+    await clickInto("doc");
     await until(async () => read("doc").length > 10, 20000, "typing to begin");
-    clickInto("other");
+    await clickInto("other");
     await until(async () => (await hud())?.phase === "paused", 5000, "a focus pause");
     const h = await hud();
     shot("win-06-focus-pause");
@@ -331,7 +337,7 @@ async function main() {
     await clear("doc");
     await configure("Emergency stop check. ".repeat(20).trim(), { seconds: 20, mistakes: "Off" });
     await start();
-    clickInto("doc");
+    await clickInto("doc");
     await until(async () => read("doc").length > 10, 20000, "typing to begin");
     ps("input.ps1", "stopkeys");
     await until(async () => (await hudPhase()) === "stopped", 3000, "the emergency stop");
