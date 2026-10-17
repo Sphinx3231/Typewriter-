@@ -11,10 +11,10 @@ It's built with [Tauri 2](https://tauri.app) (MIT/Apache-2.0). The window runs t
 | System | File | Built where | Tested |
 |---|---|---|---|
 | Linux (Debian/Ubuntu) | `Typewriter_1.1.0_amd64.deb` | locally and in CI | **yes**: installed with apt (upgrade from 1.0.0); the full end-to-end suite passed against `/usr/bin/typewriter` |
-| Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | locally and in CI | **yes**: launched; startup, exact typing and emergency stop checks passed |
-| Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | locally and in CI | built; contents and dependencies inspected; not installed |
-| Windows 10/11 | `Typewriter_1.1.0_x64-setup.exe`, `.msi` | GitHub Actions (`Desktop builds`) | **not tested** |
-| macOS 11+ | `Typewriter_1.1.0_*.dmg` | GitHub Actions (`Desktop builds`) | **not tested** |
+| Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | locally and in CI | **yes**: launched; startup, exact typing, emergency stop and back-to-back session checks passed |
+| Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | locally and in CI | partly: package digests and files verified, installed into a scratch root, and its binary passed launch/typing/stop checks on Debian. **Not installed on Fedora/openSUSE** |
+| Windows 10/11 (x64) | `Typewriter_1.1.0_x64-setup.exe`, `Typewriter_1.1.0_x64_en-US.msi` | GitHub Actions (`Desktop builds`) | built, and session tests pass in CI; **never launched** |
+| macOS 11+ (Apple Silicon) | `Typewriter_1.1.0_aarch64.dmg` | GitHub Actions (`Desktop builds`) | built, and session tests pass in CI; **never launched**. There's no Intel (x86-64) build: the CI runner is Apple Silicon. |
 
 ### Get the installer
 
@@ -110,7 +110,7 @@ With these on, Docs may turn `"quotes"` into “curly quotes”, `--` into a das
 
 | System | What's needed | Why |
 |---|---|---|
-| **Linux** | An **X11 session** (Xorg). | Wayland doesn't let one app type into another. On a Wayland session (GNOME and KDE default to it), Typewriter says so and won't start typing into other apps. That holds even though those sessions also run XWayland. To use the feature, pick **"Ubuntu on Xorg"** (or similar) at the login screen. The preview works everywhere. |
+| **Linux** | An **X11 session** (Xorg). | Wayland doesn't let one app type into another. On a Wayland session (GNOME and KDE default to it), Typewriter says so and won't start typing into other apps. That holds even though those sessions also run XWayland. To use the feature, pick **"Ubuntu on Xorg"** (or similar) at the login screen. The preview works everywhere. Tested as a native Wayland client under Weston with XWayland; not yet on a full GNOME/KDE desktop. |
 | **macOS** | **Accessibility**: System Settings › Privacy & Security › Accessibility › turn on Typewriter, then restart it. **Grant access** in the app opens the system prompt. | macOS only lets apps with this permission send key presses. Without it, Typewriter explains the problem and types nothing. |
 | **Windows** | Nothing. | Keys can't be sent to apps running as Administrator. Run the target normally. |
 
@@ -166,13 +166,14 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
   - Wayland refusal.
 
   After every interruption it checks that the source text is unchanged.
+- **Real Wayland session (`npm run test:desktop:wayland`):** the packaged app runs as a native Wayland client under headless Weston with XWayland. It checks that typing into other apps is refused with the explanation, and that the preview reproduces Unicode text exactly. Needs `weston` and `Xwayland`.
 
 ---
 
 ## Known limitations
 
 - **Google Docs end-to-end is not verified.** This environment has no Google account and no network access to Google. The same mechanism is verified into a real Chromium text area. To check it yourself, use **Check copied text**.
-- **Windows and macOS are unverified.**
+- **Windows and macOS are unverified.** There is no Intel macOS build.
   - Their installers come from CI and haven't been launched.
   - The Windows code type-checks locally.
   - The macOS code compiles only in CI (a dependency needs Apple's SDK).

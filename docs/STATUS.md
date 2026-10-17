@@ -14,7 +14,11 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 ## What works (verified by running it)
 
 **Desktop app 1.1.0** (Tauri 2, Linux X11 verified):
-- **Installers:** `.deb` installed and tested; `.AppImage` launched and tested; `.rpm` built and inspected.
+- **Installers** (built from `654dbd8`; checksums in [`RELEASE-1.1.0.md`](RELEASE-1.1.0.md)):
+  - `.deb`: installed and tested;
+  - `.AppImage`: launched and tested;
+  - `.rpm`: verified and its binary tested on Debian, but not installed on an RPM system;
+  - Windows `.msi`/`.exe` and macOS (Apple Silicon) `.dmg`: built by CI, not launched.
 - **Core workflow:** paste text, choose duration or speed and realism; then start, pause, resume and stop. Both in the app's own preview and typing into another app.
 - **Exact text:** the final text equals the source, including punctuation, spacing, line breaks, accents, CJK, emoji and combining marks. Typos are temporary.
 - **Typing into another app:**
@@ -24,7 +28,7 @@ The standalone desktop app is the primary product. The Chrome extension stays in
   - Status window with progress, time left and Pause/Resume/Stop.
   - "Sent, not checked" until **Check copied text** confirms the document.
 - **Interruptions:** the source text is unchanged after stop, failsafe and failure. Quitting asks first when text would be lost or typing is running.
-- **Wayland:** detected even under XWayland and explained; typing into other apps isn't offered there.
+- **Wayland:** detected even under XWayland and explained; typing into other apps isn't offered there. Tested with the real app as a Wayland client under Weston + XWayland.
 - **Themes:**
   - Light: white, blue and purple. Dark: black, red and orange.
   - Both use the original dragon logo, which switches with the theme.
@@ -53,7 +57,10 @@ The standalone desktop app is the primary product. The Chrome extension stays in
 | Native | `npm run test:native` | **21 passed** | Session logic on a simulated desktop; key translation; 96 engine timelines; prepare-before-typing; Wayland/no-display refusal |
 | Desktop end-to-end | `npx tauri build --no-bundle && npm run test:desktop` | **20 passed** | The real app on X11, typing into real Chromium (list in DESKTOP.md) |
 | Desktop end-to-end, installed | `node e2e-desktop/run.mjs /usr/bin/typewriter` | **20 passed** | The same 20 checks against the installed `.deb` |
-| AppImage | `APPIMAGE_EXTRACT_AND_RUN=1 ONLY="starts without\|types tricky text\|emergency stop" node e2e-desktop/run.mjs <AppImage>` | **3 passed** | Launch, exact typing, emergency stop |
+| AppImage | `APPIMAGE_EXTRACT_AND_RUN=1 ONLY="starts without\|types tricky text\|emergency stop\|back-to-back" node e2e-desktop/run.mjs <AppImage>` | **4 passed** | Launch, exact typing, emergency stop, back-to-back sessions |
+| RPM | `rpm -K`, `rpm -i --nodeps` into a scratch root, `rpm -V`, then 3 desktop checks on its binary | **OK, 3 passed** | Package integrity and binary; not dependency resolution on Fedora |
+| Real Wayland | `npm run test:desktop:wayland` | **3 passed** | Installed app under Weston 13 + XWayland: refusal message, Start disabled, exact preview |
+| GitHub CI | runs 38996960262 (CI) and 38996967288 (Desktop builds) for `654dbd8` | **all jobs success** | Lint, unit, web, native, extension; Linux, Windows and macOS installers and session tests |
 | Packaging | `npm run desktop:build` | `.deb` 3.3 MB, `.rpm` 3.3 MB, `.AppImage` 79 MB | |
 | Chrome extension (deferred) | `npm run test:extension` | **28 passed** | Unchanged behaviour; shared UI regression |
 
@@ -65,8 +72,10 @@ The standalone desktop app is the primary product. The Chrome extension stays in
   - Installers are built by CI but haven't been launched.
   - The Windows code type-checks locally; the macOS code compiles only in CI.
   - Session-logic tests run on both in CI.
-- **A real Wayland session.** Only the detection logic is tested (environment-based, plus the real app launched with `WAYLAND_DISPLAY` set).
-- **The `.rpm` install.** Inspected, not installed (this is a Debian system).
+- **A full GNOME/KDE Wayland desktop.** Tested under headless Weston with XWayland, not on a full desktop session.
+- **The `.rpm` on Fedora/openSUSE.** The package and its binary are verified here, but `dnf`/`zypper` dependency resolution and the menu entry there are not.
+- **Intel Macs.** There's no x86-64 macOS build.
+- Step-by-step manual checks for all of these: [`RELEASE-1.1.0.md`](RELEASE-1.1.0.md).
 
 ## Known limitations
 

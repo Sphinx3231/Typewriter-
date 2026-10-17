@@ -76,6 +76,7 @@ npm run test:e2e     # browser tests (Playwright, uses the preinstalled Chromium
 npm run test:native  # native typing engine tests (Rust)
 npm run test:desktop # desktop end-to-end: packaged app types into a real Chromium window
                      # (needs Xvfb, openbox, xdotool, tauri-driver; build first)
+npm run test:desktop:wayland # packaged app on a real (headless Weston) Wayland session
 npm run extension:build # Chrome extension: dist-extension/ + release/typewriter-extension-<v>.zip
 npm run test:extension  # extension end-to-end in real Chromium (builds a test variant too)
 npm run desktop:dev  # run the desktop app in development

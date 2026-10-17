@@ -14,11 +14,11 @@ Everything runs on your computer: no account, no server, no AI, no tracking.
 |---|---|---|
 | Linux (Debian/Ubuntu) | `Typewriter_1.1.0_amd64.deb` | Built, installed and tested end to end (X11) |
 | Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | Built, launched and tested (X11) |
-| Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | Built and inspected; not installed here |
-| Windows 10/11 | `.msi` / `-setup.exe` | Built by CI; **not run yet** |
-| macOS 11+ | `.dmg` | Built by CI; **not run yet** |
+| Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | Built; package verified and its binary tested on Debian; **not yet installed on Fedora/openSUSE** |
+| Windows 10/11 (x64) | `Typewriter_1.1.0_x64-setup.exe`, `Typewriter_1.1.0_x64_en-US.msi` | Built by CI (tests passed); **not launched yet** |
+| macOS 11+ (Apple Silicon only) | `Typewriter_1.1.0_aarch64.dmg` | Built by CI (tests passed); **not launched yet**; no Intel build |
 
-Step-by-step install, permissions and the typing workflow are in [`docs/DESKTOP.md`](docs/DESKTOP.md). To build the installers yourself:
+Step-by-step install, permissions and the typing workflow are in [`docs/DESKTOP.md`](docs/DESKTOP.md). Checksums, CI runs and manual verification steps for this release: [`docs/RELEASE-1.1.0.md`](docs/RELEASE-1.1.0.md). To build the installers yourself:
 
 ```bash
 npm ci
@@ -71,6 +71,7 @@ npm run desktop:dev    # the desktop app, with hot reload
 | `npm run test:native` | Native typing engine and safety tests (Rust) |
 | `npx tauri build --no-bundle` | Release desktop binary only (what `test:desktop` runs) |
 | `npm run test:desktop` | The packaged app types into a real Chromium window (Linux, X11; needs Xvfb, openbox, xdotool, tauri-driver) |
+| `npm run test:desktop:wayland` | The packaged app as a native Wayland client under headless Weston (needs weston, Xwayland, tauri-driver) |
 | `npm run desktop:build` | Desktop installers |
 | `npm run extension:build` / `test:extension` | Deferred Chrome extension: build / tests |
 

@@ -14,6 +14,7 @@
     "fixtures": "WRITE_FIXTURES=1 vitest run src/engine/fixtures.test.ts",
     "test:native": "cargo test --manifest-path src-tauri/Cargo.toml -p typewriter-native",
     "test:desktop": "node e2e-desktop/run.mjs",
+    "test:desktop:wayland": "node e2e-desktop/wayland.mjs",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "extension:build": "tsc -b && vite build -c vite.extension.config.ts && node scripts/pack-extension.mjs",
