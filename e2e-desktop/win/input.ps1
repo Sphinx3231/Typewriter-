@@ -4,6 +4,8 @@
 #   input.ps1 shot FILE.png    captures the whole primary screen
 #   input.ps1 fg               prints the title of the foreground window
 #   input.ps1 find TITLE       prints "x y w h" of the visible top-level window with that exact title
+#   input.ps1 findclass CLASS  like find, by window class (Notepad's title changes as you type)
+#   input.ps1 notepadtext      prints the text in Notepad's edit box
 #   input.ps1 hideconsoles     minimizes visible console windows (on the CI runner a stray
 #                              msedgewebview2.exe console can sit on top of the target windows)
 param([Parameter(Mandatory = $true)][string]$Cmd, [string]$A, [string]$B)
@@ -22,6 +24,8 @@ public static class TwInput {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, StringBuilder l);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -65,6 +69,26 @@ switch ($Cmd) {
         "minimized console: $($s.ToString())"
       }
     }
+  }
+  "findclass" {
+    $h = [TwInput]::FindWindow($A, [NullString]::Value)
+    if ($h -ne [IntPtr]::Zero -and [TwInput]::IsWindowVisible($h)) {
+      $r = New-Object TwInput+RECT
+      [TwInput]::GetWindowRect($h, [ref]$r) | Out-Null
+      "$($r.L) $($r.T) $($r.R - $r.L) $($r.B - $r.T)"
+    }
+  }
+  "notepadtext" {
+    $h = [TwInput]::FindWindow("Notepad", [NullString]::Value)
+    if ($h -eq [IntPtr]::Zero) { exit 2 }
+    $e = [TwInput]::FindWindowEx($h, [IntPtr]::Zero, "Edit", [NullString]::Value)
+    if ($e -eq [IntPtr]::Zero) { $e = [TwInput]::FindWindowEx($h, [IntPtr]::Zero, "RichEditD2DPT", [NullString]::Value) }
+    if ($e -eq [IntPtr]::Zero) { exit 3 }
+    $n = [TwInput]::SendMessage($e, 0x0E, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
+    $sb = New-Object System.Text.StringBuilder ($n + 1)
+    [TwInput]::SendMessage($e, 0x0D, [IntPtr]($n + 1), $sb) | Out-Null
+    # Base64, so line breaks and non-ASCII survive the console.
+    [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($sb.ToString()))
   }
   "find" {
     # [NullString]: PowerShell would pass $null as "" (no window has class ""), and find nothing.

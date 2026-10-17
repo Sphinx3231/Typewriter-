@@ -128,6 +128,27 @@ pub fn session_chars(events: &[Event]) -> Vec<char> {
     out
 }
 
+/// Receives the session's diagnostic trail, one line at a time (see `Session::with_diag`).
+pub type DiagSink = Box<dyn FnMut(&str) + Send>;
+
+/// Describes a window for the diagnostic trail without its title (titles can name documents).
+pub fn describe_window(w: &WindowInfo) -> String {
+    format!("\"{}\" (process {}, window {}, title of {} characters)", w.app_name, w.process_id, w.window_id, w.title.chars().count())
+}
+
+/// What kind of key an action is, for the diagnostic trail (never the text itself).
+fn action_kind(a: &crate::keys::KeyAction) -> String {
+    use crate::keys::KeyAction::*;
+    match a {
+        Text(t) => format!("text of {} characters", t.chars().count()),
+        Enter => "Enter".into(),
+        Tab => "Tab".into(),
+        Backspace => "Backspace".into(),
+        Left => "Left arrow".into(),
+        Right => "Right arrow".into(),
+    }
+}
+
 pub struct Session<D: Desktop> {
     cfg: Config,
     desktop: D,
@@ -141,6 +162,10 @@ pub struct Session<D: Desktop> {
     /// Time the last guard spent waiting for an unknown focus to settle; the schedule
     /// moves forward by it, so the keys that fell due meanwhile don't arrive in a burst.
     settled: Duration,
+    diag: Option<DiagSink>,
+    born: Instant,
+    /// Number of password-field checks made, for the diagnostic trail.
+    checks: usize,
 }
 
 enum Flow {
@@ -151,7 +176,27 @@ enum Flow {
 
 impl<D: Desktop> Session<D> {
     pub fn new(cfg: Config, desktop: D, control: Control, emit: Box<dyn FnMut(Update) + Send>) -> Self {
-        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None, keys_sent: 0, settled: Duration::ZERO }
+        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None, keys_sent: 0, settled: Duration::ZERO, diag: None, born: Instant::now(), checks: 0 }
+    }
+
+    /// Sends a diagnostic trail of this session (phases, timings, focus checks, key-send
+    /// results; never the text or window titles) to `diag`.
+    pub fn with_diag(mut self, diag: DiagSink) -> Self {
+        self.diag = Some(diag);
+        self
+    }
+
+    fn log(&mut self, line: impl AsRef<str>) {
+        let ms = self.born.elapsed().as_millis();
+        if let Some(d) = self.diag.as_mut() {
+            d(&format!("+{ms} ms  {}", line.as_ref()));
+        }
+    }
+
+    fn log_focus(&mut self, what: &str) {
+        let focused = self.desktop.focused_window().map(|w| describe_window(&w)).unwrap_or_else(|| "unknown".into());
+        let detail = self.desktop.focus_detail().map(|d| format!("; {d}")).unwrap_or_default();
+        self.log(format!("{what}: focused window {focused}{detail}"));
     }
 
     fn total(&self) -> f64 {
@@ -183,6 +228,10 @@ impl<D: Desktop> Session<D> {
             return "failed".into();
         }
         self.update("preparing", 0.0, None, Some("Getting the keyboard ready…".into()));
+        let distinct = session_chars(&self.cfg.events).len();
+        let (n, total, countdown) = (self.cfg.events.len(), self.total(), self.cfg.countdown_ms);
+        self.log(format!("session: {n} timeline events, {distinct} distinct characters, {total:.0} ms planned, countdown {countdown} ms"));
+        let prepare_started = Instant::now();
         // Let the backend prepare for every character up front (on X11: bind the ones
         // that aren't on the keyboard layout), well before the first key is due.
         // This only saves time later (characters left out are bound when typed), so when
@@ -199,6 +248,8 @@ impl<D: Desktop> Session<D> {
             u.total_ms = total;
             emit(u);
         });
+        let prepared = prepare_started.elapsed().as_millis();
+        self.log(format!("preparing finished in {prepared} ms; waiting for another window to get focus"));
         if self.control.stop_requested() {
             self.control.take();
             return self.stop("user", None);
@@ -213,10 +264,12 @@ impl<D: Desktop> Session<D> {
         match target {
             Some(t) if !self.is_own(&t) => self.target = Some(t),
             _ => {
+                self.log_focus("no target at the end of the countdown");
                 self.update("failed", 0.0, Some("no-target"), Some("Couldn't tell which window to type into. Nothing was typed.".into()));
                 return "failed".into();
             }
         }
+        self.log_focus("countdown ended, target chosen");
         self.type_all()
     }
 
@@ -227,6 +280,7 @@ impl<D: Desktop> Session<D> {
         let mut last_emit = Instant::now() - EMIT_EVERY;
         let waiting_since = Instant::now();
         let mut unknown_since: Option<Instant> = None;
+        let mut last_seen: Option<Option<(u64, String)>> = None;
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
@@ -240,6 +294,7 @@ impl<D: Desktop> Session<D> {
                 return Flow::End;
             }
             if waiting_since.elapsed() >= Duration::from_millis(self.cfg.wait_timeout_ms) {
+                self.log("failed: no other window was chosen in time");
                 let mins = (self.cfg.wait_timeout_ms as f64 / 60_000.0).round().max(1.0);
                 self.update(
                     "failed",
@@ -250,6 +305,16 @@ impl<D: Desktop> Session<D> {
                 return Flow::Failed;
             }
             let focused = self.desktop.focused_window();
+            let seen = focused.as_ref().map(|w| (w.process_id, w.window_id.clone()));
+            if last_seen.as_ref() != Some(&seen) {
+                let line = match &focused {
+                    Some(w) if self.is_own(w) => format!("focus: Typewriter's own window {}", describe_window(w)),
+                    Some(w) => format!("focus: {}", describe_window(w)),
+                    None => "focus: the focused window can't be read".into(),
+                };
+                self.log(line);
+                last_seen = Some(seen);
+            }
             if focused.is_some() {
                 unknown_since = None;
             } else if unknown_since.is_none() {
@@ -258,7 +323,11 @@ impl<D: Desktop> Session<D> {
             let away = focused.map(|w| !self.is_own(&w)).unwrap_or(false);
             match (away, countdown_started) {
                 (false, _) => {
-                    if countdown_started.take().is_some() || last_emit.elapsed() >= Duration::from_millis(250) {
+                    let restarted = countdown_started.take().is_some();
+                    if restarted {
+                        self.log("countdown cancelled: focus came back to Typewriter or can't be read");
+                    }
+                    if restarted || last_emit.elapsed() >= Duration::from_millis(250) {
                         // Say so when the active window can't be read, instead of waiting silently.
                         let note = unknown_since.filter(|t| t.elapsed() >= UNKNOWN_FOCUS_NOTICE).map(|_| {
                             "Typewriter can't tell which window is active, so it won't type yet. Click into your document. \
@@ -270,7 +339,10 @@ impl<D: Desktop> Session<D> {
                         last_emit = Instant::now();
                     }
                 }
-                (true, None) => countdown_started = Some(Instant::now()),
+                (true, None) => {
+                    self.log("countdown started");
+                    countdown_started = Some(Instant::now());
+                }
                 (true, Some(t0)) => {
                     let left = self.cfg.countdown_ms as f64 - t0.elapsed().as_secs_f64() * 1000.0;
                     if left <= 0.0 {
@@ -291,7 +363,14 @@ impl<D: Desktop> Session<D> {
         let target = self.target.clone()?;
         // The password-field check can be slow (it asks the focused app); run it first, so the
         // focused window is read last, right before the key is sent.
+        let t0 = Instant::now();
         let sensitive = self.desktop.sensitive_focus();
+        let took = t0.elapsed().as_millis();
+        self.checks += 1;
+        if self.checks == 1 || took >= 250 {
+            let n = self.checks;
+            self.log(format!("password-field check #{n} took {took} ms"));
+        }
         let mut focused = self.desktop.focused_window();
         if focused.is_none() {
             // Often a momentary blip while windows change; give it a moment to settle
@@ -327,6 +406,7 @@ impl<D: Desktop> Session<D> {
     }
 
     fn type_all(&mut self) -> String {
+        self.log("typing started");
         self.update("typing", 0.0, None, None);
         // The guard runs before every event, including the first, so a session that
         // starts in a password field or the wrong window pauses before any key is sent.
@@ -344,6 +424,7 @@ impl<D: Desktop> Session<D> {
                     match cmd {
                         Command::Stop => return self.stop("user", None),
                         Command::Pause => {
+                            self.log("paused by the user");
                             self.elapsed_ms = anchor.elapsed().as_secs_f64() * 1000.0;
                             match self.pause("user", "Paused.".into(), &mut anchor) {
                                 Some(()) => continue,
@@ -367,6 +448,8 @@ impl<D: Desktop> Session<D> {
             let mut waited = false;
             while self.desktop.modifiers_held() {
                 if !waited {
+                    let held = self.desktop.held_modifiers().join(", ");
+                    self.log(format!("waiting for modifier keys to be released before key #{}: reported held: {held}", self.keys_sent + 1));
                     self.update("typing", 0.0, Some("modifiers-held"), Some("Waiting for you to release Ctrl, Alt, Shift or Cmd.".into()));
                     waited = true;
                 }
@@ -375,10 +458,16 @@ impl<D: Desktop> Session<D> {
                 }
                 std::thread::sleep(TICK);
             }
+            if waited {
+                let ms = held_since.elapsed().as_millis();
+                self.log(format!("modifier keys released after {ms} ms"));
+            }
             anchor += held_since.elapsed();
             let guard = self.guard();
             anchor += std::mem::take(&mut self.settled);
             if let Some((reason, msg)) = guard {
+                let line = format!("paused before key #{} ({reason})", self.keys_sent + 1);
+                self.log_focus(&line);
                 self.elapsed_ms = (anchor.elapsed().as_secs_f64() * 1000.0).min(due);
                 if self.pause(reason, msg, &mut anchor).is_none() {
                     return "stopped".into();
@@ -391,9 +480,22 @@ impl<D: Desktop> Session<D> {
                     // Mid-burst stop: report where we are; the translator state is lost anyway.
                     return self.stop("user", None);
                 }
+                let first = self.keys_sent == 0;
+                if first {
+                    let kind = action_kind(&action);
+                    self.log(format!("first key: sending {kind}"));
+                }
+                let t0 = Instant::now();
                 if let Err(e) = self.desktop.send(&action) {
+                    let n = self.keys_sent;
+                    self.log(format!("key send failed after {n} keys sent: {e}"));
+                    self.log_focus("at the failed key");
                     self.update("failed", 0.0, Some("send-failed"), Some(format!("Couldn't send a key: {e}")));
                     return "failed".into();
+                }
+                if first {
+                    let ms = t0.elapsed().as_millis();
+                    self.log_focus(&format!("first key accepted by the system in {ms} ms"));
                 }
                 self.keys_sent += 1;
             }
@@ -406,14 +508,19 @@ impl<D: Desktop> Session<D> {
         }
         self.elapsed_ms = total;
         if self.keys_sent == 0 {
+            self.log("failed: the timeline ended without any key sent");
             self.update("failed", 0.0, Some("nothing-sent"), Some("No keys were sent, so nothing was typed.".into()));
             return "failed".into();
         }
+        let n = self.keys_sent;
+        self.log(format!("completed: {n} key actions sent"));
         self.update("completed", 0.0, None, Some("Every key was sent. Check the document to confirm the text.".into()));
         "completed".into()
     }
 
     fn stop(&mut self, reason: &str, message: Option<String>) -> String {
+        let n = self.keys_sent;
+        self.log(format!("stopped ({reason}) after {n} key actions"));
         let message = message.or_else(|| (self.keys_sent == 0).then(|| "Stopped before typing began. Nothing was typed.".to_string()));
         self.update("stopped", 0.0, Some(reason), message);
         "stopped".into()
@@ -430,7 +537,10 @@ impl<D: Desktop> Session<D> {
                     self.stop("user", None);
                     return None;
                 }
-                Some(Command::Resume) => break,
+                Some(Command::Resume) => {
+                    self.log("resume requested");
+                    break;
+                }
                 _ => {}
             }
             if self.desktop.failsafe_triggered() {
@@ -477,6 +587,7 @@ impl<D: Desktop> Session<D> {
             std::thread::sleep(TICK);
         }
         *anchor += paused_at.elapsed();
+        self.log_focus("typing resumed");
         self.update("typing", 0.0, None, None);
         Some(())
     }

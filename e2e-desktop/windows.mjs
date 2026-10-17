@@ -395,6 +395,150 @@ async function operaExtensionCheck(exe, ext, port) {
   }
 }
 
+// ---------------------------------------------------------------- the same short text into three targets
+const SHORT = "Hello from Typewriter 123.";
+const PLAIN = resolve(here, "win/textarea.html");
+const results = [];
+/** The app's diagnostic trail for the latest session (timings and window types, never text). */
+async function lastDiagnostics() {
+  const v = await wd("POST", `/session/${sid}/execute/async`, {
+    script: `const done = arguments[arguments.length - 1];
+      window.__TAURI_INTERNALS__.invoke("diagnostics").then((r) => done(r[1]), (e) => done("unavailable: " + e));`,
+    args: [],
+  });
+  const at = v.lastIndexOf("\n=== ");
+  return at >= 0 ? v.slice(at + 1) : v;
+}
+async function launchBrowser(name, exe, port, page) {
+  const profile = mkdtempSync(join(tmpdir(), `tw-${name}-`));
+  const p = spawn(
+    exe,
+    [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--remote-allow-origins=*", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate", "--window-position=60,40", "--window-size=960,640", "--new-window", `file:///${page.replace(/\\/g, "/")}`],
+    { stdio: "ignore" },
+  );
+  procs.push(p);
+  return p;
+}
+const killTree = (p) => {
+  p.kill();
+  try {
+    execFileSync("taskkill", ["/PID", String(p.pid), "/T", "/F"], { stdio: "ignore" });
+  } catch {
+    /* already gone */
+  }
+};
+/** Screen point (physical pixels) inside an element of a browser page. */
+const pagePoint = (port, part, selector, dx, dy) =>
+  cdpEval(
+    port,
+    part,
+    `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(), k = devicePixelRatio;
+      const bx = (outerWidth - innerWidth) / 2, by = outerHeight - innerHeight - bx;
+      return [Math.round((screenX + bx + r.left + ${dx}) * k), Math.round((screenY + by + r.top + ${dy}) * k)]; })()`,
+  );
+function threeTargets(opera) {
+  const targets = [
+    {
+      name: "Windows Notepad",
+      async open() {
+        this.p = spawn("notepad.exe", [], { stdio: "ignore" });
+        procs.push(this.p);
+        await until(async () => ps("input.ps1", "findclass", "Notepad") || null, 15000, "Notepad's window");
+      },
+      async point() {
+        const [x, y, w, h] = ps("input.ps1", "findclass", "Notepad").split(" ").map(Number);
+        return [Math.round(x + w / 2), Math.round(y + h / 2)];
+      },
+      focus: /Notepad/,
+      async read() {
+        return Buffer.from(ps("input.ps1", "notepadtext"), "base64").toString("utf8").replace(/\r\n/g, "\n");
+      },
+      close() {
+        killTree(this.p);
+        try {
+          execFileSync("taskkill", ["/IM", "notepad.exe", "/F"], { stdio: "ignore" });
+        } catch {
+          /* already gone */
+        }
+      },
+    },
+  ];
+  if (opera) {
+    targets.push(
+      {
+        name: "a plain text field in Opera",
+        port: 9601,
+        async open() {
+          this.p = await launchBrowser("opera-plain", opera, this.port, PLAIN);
+          await until(() => cdpEval(this.port, "textarea.html", "!!document.getElementById('t')"), 30000, "Opera to load the page");
+        },
+        point() {
+          return pagePoint(this.port, "textarea.html", "#t", 100, 40);
+        },
+        focus: /Plain text field/,
+        read() {
+          return cdpEval(this.port, "textarea.html", "document.getElementById('t').value");
+        },
+        close() {
+          killTree(this.p);
+        },
+      },
+      {
+        name: "a Google-Docs-like page in Opera (a stand-in, not Google Docs)",
+        port: 9602,
+        async open() {
+          this.p = await launchBrowser("opera-docs", opera, this.port, STRICT);
+          await until(() => cdpEval(this.port, "strict-editor", "typeof modelText === 'function'"), 30000, "Opera to load the page");
+        },
+        point() {
+          return pagePoint(this.port, "strict-editor", "#page", 120, 60);
+        },
+        focus: /Strict editor/,
+        read() {
+          return cdpEval(this.port, "strict-editor", "modelText()");
+        },
+        close() {
+          killTree(this.p);
+        },
+      },
+    );
+  }
+  return targets;
+}
+async function typeIntoTarget(t) {
+  const row = { target: t.name, started: false, firstCharAfterClickS: null, final: null, exact: false };
+  results.push(row);
+  await t.open();
+  try {
+    await configure(SHORT, { seconds: 6, mistakes: "Off", countdown: 3 });
+    await start();
+    row.started = true;
+    const [x, y] = await t.point();
+    const hidden = ps("input.ps1", "hideconsoles");
+    if (hidden) console.log(`    ${hidden.split("\n").join("\n    ")}`);
+    ps("input.ps1", "click", x, y);
+    await until(async () => t.focus.test(ps("input.ps1", "fg")), 3000, `${t.name} to have focus after the click`).catch((e) => {
+      throw new Error(`${e.message}; the click chose "${ps("input.ps1", "fg")}" instead`);
+    });
+    const t0 = Date.now();
+    const first = await until(async () => ((await t.read()) || "").length > 0, 20000, `the first character to arrive in ${t.name}`).catch((e) => e);
+    if (!(first instanceof Error)) row.firstCharAfterClickS = +((Date.now() - t0) / 1000).toFixed(1);
+    await until(async () => ["completed", "stopped", "failed"].includes(await hudPhase()), 60000, "the session to end").catch(() => {});
+    await sleep(500);
+    shot(`win-three-${results.length}`);
+    row.final = await t.read();
+    row.exact = row.final === SHORT;
+    row.phase = await hudPhase();
+    console.log(`    ${t.name}: first character ${row.firstCharAfterClickS === null ? "NEVER arrived" : `arrived ${row.firstCharAfterClickS} s after the click`}; session ${row.phase}; text ${row.exact ? "exact" : `differs: ${JSON.stringify(row.final)}`}`);
+    console.log(`    diagnostics:\n      ${(await lastDiagnostics()).trim().split("\n").join("\n      ")}`);
+    if (first instanceof Error) throw first;
+    assert(row.exact, `final text in ${t.name} differs: ${JSON.stringify(row.final)}`);
+  } finally {
+    await ui(`(__tw.has("btn-cancel") ? __tw.click("btn-cancel") : __tw.has("btn-stop") && __tw.click("btn-stop"), 1)`).catch(() => {});
+    t.close();
+  }
+}
+
 // ---------------------------------------------------------------- run
 async function main() {
   assert(existsSync(APP), `App not found: ${APP}`);
@@ -410,6 +554,16 @@ async function main() {
     mainHandle = await wd("GET", `/session/${sid}/window`);
     await until(() => js(`return !!document.querySelector('[data-testid="btn-start"]') && !document.getElementById("boot")`), 30000, "the UI");
     shot("win-01-launched");
+  });
+
+  await check("the app under test is the intended build (Settings shows its version and commit)", async () => {
+    await ui(`(document.querySelector('[data-testid="nav-settings"]').click(), 1)`);
+    const about = await until(() => js(`const b = document.querySelector('[data-testid="build-id"]'); return b && [document.getElementById("prefs-about").textContent.trim(), b.textContent.trim()]`), 8000, "Settings › About");
+    console.log(`    ${about[0]}, ${about[1]} (app: ${APP})`);
+    shot("win-00-about");
+    const want = (process.env.EXPECT_COMMIT ?? "").slice(0, 7);
+    if (want) assert(about[1] === `Build ${want}`, `the app shows "${about[1]}", expected "Build ${want}": this isn't the build under test`);
+    await ui(`(document.querySelector('[data-testid="nav-workspace"]').click(), 1)`);
   });
 
   await check("Type into app answers at once and the status window shows its controls (not blank)", async () => {
@@ -501,8 +655,16 @@ async function main() {
     shot("win-07-emergency-stop");
   });
 
-  // The native text windows stay on top; close them so the browser windows can be clicked.
+  // The native text windows stay on top; close them so the other windows can be clicked.
   for (const t of Object.values(targets)) t.proc.kill();
+  const operaExe = BROWSERS.find(([n]) => n === "Opera")[1].find((x) => existsSync(x));
+  if (!operaExe) console.log("  - Opera isn't installed: only Notepad in the three-target test");
+  for (const t of threeTargets(operaExe)) {
+    await check(`the same short text into ${t.name}: the first character arrives and the text is exact`, () => typeIntoTarget(t));
+  }
+  console.log("\n  Three-target summary:");
+  for (const r of results) console.log(`    ${r.target}: first character ${r.firstCharAfterClickS === null ? "never" : `${r.firstCharAfterClickS} s after the click`}, ${r.exact ? "exact" : "NOT exact"}`);
+  console.log("");
   let port = 9555;
   for (const [name, paths] of BROWSERS) {
     const exe = paths.find((x) => existsSync(x));

@@ -553,3 +553,46 @@ fn waiting_for_the_keymap_lock_ends_when_cancelled_and_succeeds_once_released() 
     drop(held);
     assert!(lock_unless(&KEYMAP, &|| false).is_some());
 }
+
+#[test]
+fn the_diagnostic_trail_records_each_step_but_never_the_text_or_titles() {
+    let fake = Fake::default();
+    fake.focus(win("tw", OWN, "Typewriter"));
+    let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+    let l2 = lines.clone();
+    let desk = fake.clone();
+    let control = Control::default();
+    let c2 = control.clone();
+    let handle = thread::spawn(move || {
+        let cfg = Config { events: events_for("confidential words", 2.0), countdown_ms: 50, resume_countdown_ms: 100, own_pid: OWN, prepare_timeout_ms: 1000, wait_timeout_ms: 10_000 };
+        Session::new(cfg, desk, c2, Box::new(|_| {})).with_diag(Box::new(move |l| l2.lock().unwrap().push(l.to_string()))).run()
+    });
+    thread::sleep(Duration::from_millis(50));
+    fake.0.lock().unwrap().modifiers = true;
+    fake.focus(win("doc", 42, "Secret plan - Google Docs"));
+    thread::sleep(Duration::from_millis(250));
+    fake.0.lock().unwrap().modifiers = false;
+    assert_eq!(handle.join().unwrap(), "completed");
+    let trail = lines.lock().unwrap().join("\n");
+    for step in [
+        "session: 18 timeline events",
+        "preparing finished",
+        "focus: Typewriter's own window",
+        "countdown started",
+        "countdown ended, target chosen",
+        "typing started",
+        "password-field check #1 took",
+        "waiting for modifier keys to be released before key #1",
+        "modifier keys released after",
+        "first key: sending text of 1 characters",
+        "first key accepted by the system",
+        "completed: 18 key actions sent",
+    ] {
+        assert!(trail.contains(step), "missing {step:?} in:\n{trail}");
+    }
+    assert!(trail.contains("title of 25 characters"), "{trail}");
+    for secret in ["confidential", "words", "Secret", "Google Docs"] {
+        assert!(!trail.contains(secret), "the trail contains {secret:?}:\n{trail}");
+    }
+    drop(control);
+}

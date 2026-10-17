@@ -1,4 +1,4 @@
-import { Monitor, Moon, RotateCcw, Sun, Trash2, Volume2 } from "lucide-react";
+import { ClipboardCopy, Monitor, Moon, RotateCcw, Sun, Trash2, Volume2 } from "lucide-react";
 import { useId } from "react";
 import { TypingSound } from "../audio/sound";
 import type { Session } from "../state/useSession";
@@ -6,6 +6,7 @@ import type { ThemePreference } from "../theme/theme";
 import { Button, ConfirmButton, Field, Segmented, Switch, useToast } from "./controls";
 import { LogoMark } from "./Logo";
 import { APP_COMMIT, APP_VERSION } from "../build";
+import { isDesktop } from "../platform";
 
 const SHORTCUTS: [string, string][] = [
   ["Ctrl / ⌘ + Enter", "Start, or start again"],
@@ -163,6 +164,27 @@ export function PreferencesView({
           <p className="panel__sub" data-testid="build-id">
             Build {APP_COMMIT}
           </p>
+          {isDesktop() ? (
+            <div className="prefs__actions">
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<ClipboardCopy size={15} />}
+                data-testid="copy-diagnostics"
+                onClick={async () => {
+                  try {
+                    const { invoke } = await import("@tauri-apps/api/core");
+                    await invoke("copy_diagnostics");
+                    toast("Typing diagnostics copied. They contain timings and window types, not your text.", "success");
+                  } catch (e) {
+                    toast(`Couldn't copy the diagnostics: ${String(e)}`, "error");
+                  }
+                }}
+              >
+                Copy typing diagnostics
+              </Button>
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

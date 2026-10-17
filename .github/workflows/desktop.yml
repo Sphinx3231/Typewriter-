@@ -74,8 +74,18 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Build the app
-        run: npx tauri build --no-bundle
+      - name: Build the Windows installer (the packaged app, as users get it)
+        run: npx tauri build --bundles nsis
+      - name: Install the packaged app silently and find it
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          "installer: $($setup.Name)"
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter", "$env:LOCALAPPDATA\Programs", "$env:ProgramFiles\Typewriter" -Recurse -Filter typewriter.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "the installed typewriter.exe wasn't found" }
+          "installed: $($exe.FullName)"
+          "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
       - name: Install tauri-driver and a matching msedgedriver
         run: |
           cargo install tauri-driver --locked
@@ -87,10 +97,11 @@ jobs:
       - name: Install Opera (best effort; Chrome and Edge are preinstalled)
         continue-on-error: true
         run: choco install opera -y --no-progress
-      - name: Windows end-to-end
+      - name: Windows end-to-end (the installed app)
         env:
           SHOTS: e2e-shots
-        run: node e2e-desktop/windows.mjs src-tauri/target/release/typewriter.exe
+          EXPECT_COMMIT: ${{ github.sha }}
+        run: node e2e-desktop/windows.mjs "$env:TW_EXE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

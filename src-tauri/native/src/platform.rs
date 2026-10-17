@@ -37,6 +37,15 @@ pub trait Desktop {
     /// It should return early once `cancelled()` is true (Stop was requested or the
     /// preparation time ran out), and report `progress(done, total)` as it goes.
     fn prepare(&mut self, _chars: &[char], _cancelled: &dyn Fn() -> bool, _progress: &mut dyn FnMut(usize, usize)) {}
+    /// Diagnostics only: the modifier keys the platform reports as held.
+    fn held_modifiers(&mut self) -> Vec<&'static str> {
+        Vec::new()
+    }
+    /// Diagnostics only: where keyboard focus is inside the focused window and whether keys
+    /// can reach it (control class, responsiveness, privilege levels). Never titles or text.
+    fn focus_detail(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// Locks `m`, waiting while another holder has it, unless `cancelled()` turns true
@@ -244,6 +253,28 @@ impl Desktop for RealDesktop {
         let _ = (chars, cancelled, progress);
     }
 
+    fn held_modifiers(&mut self) -> Vec<&'static str> {
+        #[cfg(target_os = "windows")]
+        {
+            os::held_modifiers()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Vec::new()
+        }
+    }
+
+    fn focus_detail(&mut self) -> Option<String> {
+        #[cfg(target_os = "windows")]
+        {
+            os::focus_detail()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            None
+        }
+    }
+
     fn send(&mut self, action: &KeyAction) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         if let Some(t) = self.typer.as_mut() {
@@ -258,6 +289,10 @@ impl Desktop for RealDesktop {
             KeyAction::Left => enigo.key(Key::LeftArrow, Direction::Click),
             KeyAction::Right => enigo.key(Key::RightArrow, Direction::Click),
         };
+        // On Windows, add the system's error code (for example 5, access denied, when a window
+        // of a more privileged app has focus).
+        #[cfg(target_os = "windows")]
+        let r = r.map_err(|e| format!("{e} [{}]", std::io::Error::last_os_error()));
         r.map_err(|e| e.to_string())
     }
 }
@@ -266,7 +301,11 @@ impl Desktop for RealDesktop {
 mod os {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
+    use windows::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel, TOKEN_MANDATORY_LABEL, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsHungAppWindow, GUITHREADINFO};
 
     /// Uses UI Automation to ask whether the focused control is a password box.
     pub fn sensitive_focus() -> Option<String> {
@@ -283,6 +322,78 @@ mod os {
 
     pub fn modifiers_held() -> bool {
         unsafe { [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| (GetAsyncKeyState(k.0 as i32) as u16 & 0x8000) != 0) }
+    }
+
+    pub fn held_modifiers() -> Vec<&'static str> {
+        [(VK_SHIFT, "Shift"), (VK_CONTROL, "Ctrl"), (VK_MENU, "Alt"), (VK_LWIN, "left Windows key"), (VK_RWIN, "right Windows key")]
+            .iter()
+            .filter(|(k, _)| unsafe { (GetAsyncKeyState(k.0 as i32) as u16 & 0x8000) != 0 })
+            .map(|(_, n)| *n)
+            .collect()
+    }
+
+    fn class_name(h: HWND) -> String {
+        let mut b = [0u16; 256];
+        let n = unsafe { GetClassNameW(h, &mut b) };
+        String::from_utf16_lossy(&b[..n.max(0) as usize])
+    }
+
+    /// The process's integrity level (Windows blocks input into windows of a higher level).
+    fn integrity(pid: u32) -> &'static str {
+        unsafe {
+            let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+                return "unknown (can't open process)";
+            };
+            let mut token = HANDLE::default();
+            let level = if OpenProcessToken(process, TOKEN_QUERY, &mut token).is_ok() {
+                let mut len = 0u32;
+                let _ = GetTokenInformation(token, TokenIntegrityLevel, None, 0, &mut len);
+                let mut buf = vec![0u8; len as usize];
+                let level = if len > 0 && GetTokenInformation(token, TokenIntegrityLevel, Some(buf.as_mut_ptr() as *mut _), len, &mut len).is_ok() {
+                    let label = &*(buf.as_ptr() as *const TOKEN_MANDATORY_LABEL);
+                    let count = *GetSidSubAuthorityCount(label.Label.Sid);
+                    match *GetSidSubAuthority(label.Label.Sid, count.saturating_sub(1) as u32) {
+                        r if r < 0x2000 => "low",
+                        r if r < 0x3000 => "medium",
+                        r if r < 0x4000 => "high",
+                        _ => "system",
+                    }
+                } else {
+                    "unknown"
+                };
+                let _ = CloseHandle(token);
+                level
+            } else {
+                "unknown (no token access)"
+            };
+            let _ = CloseHandle(process);
+            level
+        }
+    }
+
+    pub fn focus_detail() -> Option<String> {
+        unsafe {
+            let fg = GetForegroundWindow();
+            if fg.is_invalid() {
+                return Some("no foreground window".into());
+            }
+            let mut pid = 0u32;
+            let thread = GetWindowThreadProcessId(fg, Some(&mut pid));
+            let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+            let focus = if GetGUIThreadInfo(thread, &mut info).is_ok() && !info.hwndFocus.is_invalid() {
+                class_name(info.hwndFocus)
+            } else {
+                "none".into()
+            };
+            Some(format!(
+                "window class {}, keyboard focus in {}, responding {}, privilege: target {} / Typewriter {}",
+                class_name(fg),
+                focus,
+                !IsHungAppWindow(fg).as_bool(),
+                integrity(pid),
+                integrity(GetCurrentProcessId()),
+            ))
+        }
     }
 }
 

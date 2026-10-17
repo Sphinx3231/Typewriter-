@@ -13,7 +13,77 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use typewriter_native::{check_support, spawn_session, Command, Config, Control, Event, Support};
+use typewriter_native::{check_support, spawn_session, Command, Config, Control, DiagSink, Event, Support};
+
+// ---------------------------------------------------------------- diagnostics
+
+/// Typing diagnostics: one file in the app's log folder, kept under ~512 KB. It records
+/// phases, timings, focus checks and key-send results, never the text or window titles.
+fn diag_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    Some(app.path().app_log_dir().ok()?.join("typing-diagnostics.log"))
+}
+
+/// UTC time as `YYYY-MM-DD hh:mm:ss`.
+fn utc_now() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+fn diag_append(path: &std::path::Path, line: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// Starts a session's section of the diagnostics file and returns its sink.
+fn diag_sink(app: &AppHandle, id: u64) -> DiagSink {
+    let Some(path) = diag_path(app) else { return Box::new(|_: &str| {}) };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Keep the file small: when it passes 512 KB, keep its last 256 KB.
+    if std::fs::metadata(&path).map(|m| m.len() > 512 * 1024).unwrap_or(false) {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            let cut = text.len().saturating_sub(256 * 1024);
+            let start = text[cut..].find('\n').map(|i| cut + i + 1).unwrap_or(cut);
+            let _ = std::fs::write(&path, &text[start..]);
+        }
+    }
+    let version = app.package_info().version.to_string();
+    diag_append(&path, &format!("\n=== {} UTC · session {id} · Typewriter {version} build {} · {} {}", utc_now(), env!("TYPEWRITER_COMMIT"), std::env::consts::OS, std::env::consts::ARCH));
+    Box::new(move |line: &str| diag_append(&path, line))
+}
+
+/// The end of the diagnostics file (the latest sessions) and where it is.
+#[tauri::command]
+fn diagnostics(app: AppHandle) -> (String, String) {
+    let path = diag_path(&app);
+    let text = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let cut = text.len().saturating_sub(64 * 1024);
+    let start = text[cut..].find('\n').map(|i| cut + i + 1).filter(|_| cut > 0).unwrap_or(cut);
+    (path.map(|p| p.display().to_string()).unwrap_or_default(), text[start..].to_string())
+}
+
+/// Copies the latest diagnostics to the clipboard so the user can paste them into a report.
+#[tauri::command]
+fn copy_diagnostics(app: AppHandle) -> Result<usize, String> {
+    let (path, text) = diagnostics(app);
+    let report = format!("Typewriter typing diagnostics ({path})\n{text}");
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(report.clone())).map_err(|e| e.to_string())?;
+    Ok(report.len())
+}
 
 /// Emergency stop while typing into another app: Ctrl+Shift+Space (all platforms).
 fn stop_shortcut() -> Shortcut {
@@ -104,17 +174,24 @@ struct StartResult {
 #[tauri::command]
 async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool, session: u64) -> Result<StartResult, String> {
     let state = app.state::<AppState>();
+    let called = std::time::Instant::now();
     // One start at a time, so each one stops the previous session before starting its own.
     let _starting = state.starting.lock().unwrap_or_else(|e| e.into_inner());
     stop_session(&app);
+    let id = state.current.fetch_add(1, Ordering::SeqCst) + 1;
+    let mut diag = diag_sink(&app, id);
+    let ms = |t: std::time::Instant| t.elapsed().as_millis();
+    diag(&format!("app: Start received; previous session told to stop after {} ms", ms(called)));
     let support = check_support(false);
     if !support.available {
+        diag(&format!("app: refused: {} ({})", support.state, support.message));
         return Err(serde_json::to_string(&support).unwrap_or(support.message));
     }
 
     let gs = app.global_shortcut();
     let _ = gs.unregister(stop_shortcut());
     let shortcut_registered = gs.register(stop_shortcut()).is_ok();
+    diag(&format!("app: emergency-stop shortcut registered: {shortcut_registered}; {} events, countdown {countdown_ms} ms, minimize {minimize}", events.len()));
 
     let cfg = Config {
         events,
@@ -124,7 +201,6 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
         prepare_timeout_ms: PREPARE_TIMEOUT_MS,
         wait_timeout_ms: WAIT_TIMEOUT_MS,
     };
-    let id = state.current.fetch_add(1, Ordering::SeqCst) + 1;
     *state.last.lock().unwrap() = None;
     let handle = app.clone();
     let (control, worker) = spawn_session(cfg, move |update| {
@@ -155,7 +231,7 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
                 }
             });
         }
-    })
+    }, diag)
     .map_err(|s| serde_json::to_string(&s).unwrap_or(s.message))?;
     // Stored before the status window appears, so its Stop and the shortcut work at once.
     *state.control.lock().unwrap() = Some((id, control));
@@ -165,11 +241,15 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
         workers.push(worker);
     }
 
+    let hud = std::time::Instant::now();
     show_hud(&app);
     if minimize {
         if let Some(main) = app.get_webview_window("main") {
             let _ = main.minimize();
         }
+    }
+    if let Some(path) = diag_path(&app) {
+        diag_append(&path, &format!("app: status window shown in {} ms; Start answered after {} ms", ms(hud), ms(called)));
     }
     Ok(StartResult { shortcut_registered })
 }
@@ -248,7 +328,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main])
+        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main, diagnostics, copy_diagnostics])
         .setup(|app| {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.
