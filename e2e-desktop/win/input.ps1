@@ -1,0 +1,60 @@
+# Real operating-system input and screen capture for the Windows end-to-end test.
+#   input.ps1 click X Y        a real left click at screen coordinates
+#   input.ps1 stopkeys         presses Ctrl+Shift+Space (Typewriter's emergency stop)
+#   input.ps1 shot FILE.png    captures the whole primary screen
+#   input.ps1 fg               prints the title of the foreground window
+#   input.ps1 find TITLE       prints "x y w h" of the visible top-level window with that exact title
+param([Parameter(Mandatory = $true)][string]$Cmd, [string]$A, [string]$B)
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class TwInput {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+}
+"@
+[TwInput]::SetProcessDPIAware() | Out-Null
+switch ($Cmd) {
+  "click" {
+    [TwInput]::SetCursorPos([int]$A, [int]$B) | Out-Null
+    Start-Sleep -Milliseconds 60
+    [TwInput]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero)
+    [TwInput]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+  }
+  "stopkeys" {
+    foreach ($k in 0x11, 0x10, 0x20) { [TwInput]::keybd_event($k, 0, 0, [UIntPtr]::Zero) }
+    Start-Sleep -Milliseconds 80
+    foreach ($k in 0x20, 0x10, 0x11) { [TwInput]::keybd_event($k, 0, 0x2, [UIntPtr]::Zero) }
+  }
+  "shot" {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+    $bmp.Save($A, [System.Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+  }
+  "fg" {
+    $s = New-Object System.Text.StringBuilder 512
+    [TwInput]::GetWindowText([TwInput]::GetForegroundWindow(), $s, 512) | Out-Null
+    $s.ToString()
+  }
+  "find" {
+    $h = [TwInput]::FindWindow($null, $A)
+    if ($h -ne [IntPtr]::Zero -and [TwInput]::IsWindowVisible($h)) {
+      $r = New-Object TwInput+RECT
+      [TwInput]::GetWindowRect($h, [ref]$r) | Out-Null
+      "$($r.L) $($r.T) $($r.R - $r.L) $($r.B - $r.T)"
+    }
+  }
+}
