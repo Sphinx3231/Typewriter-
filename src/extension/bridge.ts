@@ -77,10 +77,10 @@ export function extensionBridge(): Bridge {
         ? { available: true, state: "ok", platform: "chrome", message: "Ready to type into web pages in this window." }
         : MISSING_DEBUGGER;
     },
-    async start(events: TypingEvent[], countdownMs: number, _minimize: boolean, source = "") {
+    async start(events: TypingEvent[], countdownMs: number, _minimize: boolean, source = "", token?: number) {
       if (!(await hasDebuggerPermission())) throw JSON.stringify(MISSING_DEBUGGER);
       session?.send("stop");
-      const s = new ChromeTypingSession(chromeBrowser(report), events, { countdownMs, resumeCountdownMs: 3000, source }, (u) => listeners.forEach((fn) => fn(u as NativeUpdate)));
+      const s = new ChromeTypingSession(chromeBrowser(report), events, { countdownMs, resumeCountdownMs: 3000, source }, (u) => listeners.forEach((fn) => fn({ ...u, session: token } as NativeUpdate)));
       session = s;
       void s.run().finally(() => {
         if (session === s) session = null;

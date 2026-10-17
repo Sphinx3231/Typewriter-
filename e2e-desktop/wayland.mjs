@@ -122,7 +122,7 @@ async function main() {
     try {
       r = await wd("POST", `/session/${sid}/execute/async`, {
         script: `const done = arguments[arguments.length - 1];
-          window.__TAURI_INTERNALS__.invoke("external_start", { events: [{ kind: "type", at: 10, text: "x" }], countdownMs: 2000, minimize: false })
+          window.__TAURI_INTERNALS__.invoke("external_start", { events: [{ kind: "type", at: 10, text: "x" }], countdownMs: 2000, minimize: false, session: 1 })
             .then(() => done({ started: true }), (e) => done({ started: false, error: String(e) }));`,
         args: [],
       });

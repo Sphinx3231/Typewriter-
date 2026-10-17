@@ -411,18 +411,33 @@ fn preparing_is_reported_first_and_progress_is_visible() {
 }
 
 #[test]
-fn preparation_that_never_finishes_fails_with_an_explanation_instead_of_hanging() {
+fn preparation_that_runs_too_long_is_cut_short_and_the_text_still_arrives_exactly() {
+    // Preparing up front only saves time; a text with very many symbols that aren't on the
+    // layout must not fail because of it. The rest are prepared as they are typed.
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));
     fake.0.lock().unwrap().slow_prepare = true;
+    let text = "still typed";
     let t0 = Instant::now();
-    let r = start_with(&fake, events_for("never typed", 2.0), 10, 300, 180_000);
-    assert_eq!(r.handle.join().unwrap(), "failed");
+    let r = start_with(&fake, events_for(text, 2.0), 10, 300, 180_000);
+    assert!(wait_for_phase(&r, "typing", 3000), "typing didn't begin: the time limit wasn't applied");
     // Well under the 5 s the stuck preparation would otherwise take (margin for slow CI runners).
-    assert!(t0.elapsed() < Duration::from_millis(3000), "took {:?}: the time limit wasn't applied", t0.elapsed());
+    assert!(t0.elapsed() < Duration::from_millis(3000), "took {:?}", t0.elapsed());
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), text);
+}
+
+#[test]
+fn stop_before_any_key_says_nothing_was_typed() {
+    let fake = Fake::default();
+    fake.focus(win("tw", OWN, "Typewriter"));
+    let r = start(&fake, events_for("never typed", 2.0), 10);
+    assert!(wait_for_phase(&r, "waiting", 2000));
+    r.control.send(Command::Stop);
+    assert_eq!(r.handle.join().unwrap(), "stopped");
     let u = last(&r.updates);
-    assert_eq!(u.reason.as_deref(), Some("prepare-timeout"));
-    assert!(u.message.as_deref().unwrap_or("").contains("nothing was typed"), "{:?}", u.message);
+    assert_eq!(u.phase, "stopped");
+    assert!(u.message.as_deref().unwrap_or("").contains("Nothing was typed"), "{:?}", u.message);
     assert_eq!(fake.keys(), 0);
 }
 

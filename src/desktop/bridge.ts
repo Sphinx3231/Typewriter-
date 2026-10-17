@@ -15,6 +15,8 @@ export interface NativeUpdate {
   message: string | null;
   /** Desktop: whether the emergency-stop shortcut is registered right now. */
   shortcutRegistered?: boolean;
+  /** The session token passed to start(); updates from an older session carry another one. */
+  session?: number;
   /** Read-back result, when the destination could be inspected (browser extension). */
   verification?: { status: "verified" | "mismatch" | "unreadable"; detail: string };
 }
@@ -28,7 +30,8 @@ export interface Support {
 
 export interface Bridge {
   support(prompt: boolean): Promise<Support>;
-  start(events: TypingEvent[], countdownMs: number, minimize: boolean, source?: string): Promise<{ shortcutRegistered: boolean }>;
+  /** `session` is echoed in every update of this session, so late updates from an earlier one can be told apart. */
+  start(events: TypingEvent[], countdownMs: number, minimize: boolean, source?: string, session?: number): Promise<{ shortcutRegistered: boolean }>;
   control(command: "pause" | "resume" | "stop"): Promise<void>;
   readClipboard(): Promise<string>;
   onUpdate(fn: (u: NativeUpdate) => void): () => void;
@@ -49,7 +52,7 @@ export async function tauriBridge(): Promise<Bridge> {
   const { listen } = await import("@tauri-apps/api/event");
   return {
     support: (prompt) => invoke<Support>("external_support", { prompt }),
-    start: (events, countdownMs, minimize) => invoke("external_start", { events: slim(events), countdownMs, minimize }),
+    start: (events, countdownMs, minimize, _source, session) => invoke("external_start", { events: slim(events), countdownMs, minimize, session: session ?? 0 }),
     control: (command) => invoke("external_control", { command }),
     readClipboard: () => invoke<string>("read_clipboard"),
     showMain: () => invoke("show_main"),

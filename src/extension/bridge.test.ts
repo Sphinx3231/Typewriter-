@@ -53,9 +53,14 @@ describe("extension bridge", () => {
     const { extensionBridge } = await import("./bridge");
     const bridge = extensionBridge();
     expect((await bridge.support(true)).available).toBe(true);
-    const r = await bridge.start([{ at: 0, kind: "type", text: "a", src: 1 } as never], 60_000, false, "a");
+    const updates: { session?: number }[] = [];
+    bridge.onUpdate((u) => updates.push(u));
+    const r = await bridge.start([{ at: 0, kind: "type", text: "a", src: 1 } as never], 60_000, false, "a", 7);
     expect(r.shortcutRegistered).toBe(true);
     expect(f.chrome.permissions.request).not.toHaveBeenCalled();
     await bridge.control("stop");
+    // Every update carries the token given to start, so an earlier session's late updates can be told apart.
+    await vi.waitFor(() => expect(updates.length).toBeGreaterThan(0));
+    expect(updates.every((u) => u.session === 7)).toBe(true);
   });
 });

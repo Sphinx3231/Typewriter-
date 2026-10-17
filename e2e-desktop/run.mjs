@@ -361,6 +361,25 @@ async function main() {
     assert((await docValue()) === text, `document differs: ${JSON.stringify(await docValue())}`);
   });
 
+  await check("Cancel and Start again at once: the new session isn't taken over by the cancelled one, and types exactly", async () => {
+    await resetDoc();
+    const text = "日本語中文한국어Ελληνικάαβγδ→←↑↓∑∏√∞≈≠≤≥ again";
+    await prepare(text, { seconds: 4, mistakes: "Off", minimize: false, countdown: 1 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await until(() => ui(`!!document.querySelector('[data-testid="btn-cancel"]')`), 2000, "Cancel while getting ready");
+    await ui(`(__tw.click("btn-cancel"), 1)`);
+    await until(() => ui(`!!document.querySelector('[data-testid="btn-start"]') && !document.querySelector('[data-testid="btn-start"]').disabled`), 3000, "Start again");
+    await ui(`(__tw.click("btn-start"), 1)`);
+    // The cancelled session's own "stopped" must not end this one.
+    await sleep(1500);
+    const s = await state();
+    assert(s.status !== "Stopped", `the new session shows "${s.status}": the cancelled session took it over`);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 30000, "the new session to finish");
+    assert((await docValue()) === text, `document differs: ${JSON.stringify(await docValue())}`);
+    await until(async () => boundKeysyms([..."日本語→∑"]).length === 0, 8000, "temporary key bindings removed");
+  });
+
   await check("types tricky text into another app with typos, corrections, unicode, tabs and line breaks — exact result", async () => {
     await resetDoc();
     await prepare(TRICKY, { seconds: 20, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });

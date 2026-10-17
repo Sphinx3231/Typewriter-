@@ -33,9 +33,9 @@ const IDLE: ExternalInfo = {
 };
 
 /**
- * If the typing engine is still "preparing" this long after Start (it should answer at once,
- * and fails by itself after 15 s), the session is ended here with an explanation instead of
- * waiting forever.
+ * If the typing engine hasn't sent a single update this long after Start (it answers at once,
+ * and from then on enforces its own limits), the session is ended here with an explanation
+ * instead of waiting forever.
  */
 export const START_LIMIT_MS = 20_000;
 
@@ -66,6 +66,8 @@ export class ExternalController implements PlaybackDriver {
   /** Stop was pressed while starting: stop the native session as soon as it exists. */
   private stopWhenStarted = false;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
+  /** Identifies this start to the typing engine; updates carrying another token are from an earlier session. */
+  private token = 0;
 
   constructor(
     private bridge: Bridge,
@@ -124,6 +126,8 @@ export class ExternalController implements PlaybackDriver {
     if (!["ready", "completed", "stopped", "error"].includes(this.status)) return false;
     this.resetMirror();
     const session = ++this.session;
+    // Unique across app reloads too: an engine session from before a reload can still be finishing.
+    this.token = Date.now() * 1000 + (session % 1000);
     this.status = "playing";
     this.starting = true;
     this.stopWhenStarted = false;
@@ -131,7 +135,7 @@ export class ExternalController implements PlaybackDriver {
     this.emit();
     this.armWatchdog(session);
     this.bridge
-      .start(this.timeline.events, this.options.countdownMs, this.options.minimize, this.source)
+      .start(this.timeline.events, this.options.countdownMs, this.options.minimize, this.source, this.token)
       .then((r) => {
         if (session !== this.session) return;
         this.starting = false;
@@ -156,7 +160,7 @@ export class ExternalController implements PlaybackDriver {
     return true;
   }
 
-  /** Ends a session that never gets past "preparing", with an explanation. */
+  /** Ends a session whose typing engine never answers, with an explanation. */
   private armWatchdog(session: number) {
     this.clearWatchdog();
     this.watchdog = setTimeout(() => {
@@ -166,7 +170,7 @@ export class ExternalController implements PlaybackDriver {
       this.stopWhenStarted = this.starting;
       this.status = "error";
       this.error =
-        "Typewriter couldn't start typing: the typing engine didn't get ready within 20 seconds. Nothing was typed. " +
+        "Typewriter couldn't start typing: the typing engine didn't respond within 20 seconds. Nothing was typed. " +
         "Press Type into app to try again; if it keeps happening, restart Typewriter.";
       this.info = { ...this.info, phase: "failed", reason: "start-timeout", message: this.error };
       this.emit();
@@ -252,6 +256,8 @@ export class ExternalController implements PlaybackDriver {
   /** Applies a native status update. Exposed for tests. */
   onUpdate(u: NativeUpdate) {
     if (!this.timeline || !this.running()) return;
+    // A late update from a session that was stopped before this one started.
+    if (u.session !== undefined && u.session !== this.token) return;
     const events = this.timeline.events;
     const upto = Math.min(u.index, events.length);
     while (this.applied < upto) {
@@ -268,7 +274,8 @@ export class ExternalController implements PlaybackDriver {
     this.receivedAt = this.now();
     const target = u.target ? { title: u.target.title, appName: u.target.appName } : this.info.target;
     this.info = { ...this.info, phase: u.phase, countdownMs: u.countdownMs, target, reason: u.reason, message: u.message };
-    if (u.phase !== "preparing") this.clearWatchdog();
+    // The engine answered, and enforces its own time limits from here on.
+    this.clearWatchdog();
     switch (u.phase) {
       case "preparing":
       case "waiting":

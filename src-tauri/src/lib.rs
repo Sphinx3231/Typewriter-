@@ -7,6 +7,7 @@
 //! back as `external://update` events to the main window and the small
 //! always-on-top status window ("hud").
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -21,7 +22,13 @@ fn stop_shortcut() -> Shortcut {
 
 #[derive(Default)]
 struct AppState {
-    control: Mutex<Option<Control>>,
+    /// The current session's control, with the id of the session it belongs to.
+    control: Mutex<Option<(u64, Control)>>,
+    /// Id of the newest session. Updates and endings of older sessions are ignored, so a
+    /// session stopped just before a new Start can't take over the new one.
+    current: AtomicU64,
+    /// Starts run one at a time (async commands can run concurrently).
+    starting: Mutex<()>,
     /// The latest status of the current session, for a status window that opens late.
     last: Mutex<Option<serde_json::Value>>,
     /// Typing threads that may still be running or restoring the keymap.
@@ -58,7 +65,7 @@ fn finish_sessions(app: &AppHandle) {
 }
 
 fn stop_session(app: &AppHandle) {
-    if let Some(c) = app.state::<AppState>().control.lock().unwrap().as_ref() {
+    if let Some((_, c)) = app.state::<AppState>().control.lock().unwrap().as_ref() {
         c.send(Command::Stop);
     }
 }
@@ -80,6 +87,8 @@ struct UpdateEvent<'a> {
     #[serde(flatten)]
     update: &'a typewriter_native::Update,
     shortcut_registered: bool,
+    /// The token the window passed to `external_start`.
+    session: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -91,9 +100,12 @@ struct StartResult {
 /// Async on purpose: it creates the status window, and on Windows creating a window
 /// in a synchronous command deadlocks (see WebviewWindowBuilder's "Known issues").
 /// That deadlock left the status window blank and typing never started.
+/// `session` is a token chosen by the window; every update of this session carries it.
 #[tauri::command]
-async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool) -> Result<StartResult, String> {
-    // Only one session at a time.
+async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimize: bool, session: u64) -> Result<StartResult, String> {
+    let state = app.state::<AppState>();
+    // One start at a time, so each one stops the previous session before starting its own.
+    let _starting = state.starting.lock().unwrap_or_else(|e| e.into_inner());
     stop_session(&app);
     let support = check_support(false);
     if !support.available {
@@ -104,13 +116,6 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
     let _ = gs.unregister(stop_shortcut());
     let shortcut_registered = gs.register(stop_shortcut()).is_ok();
 
-    show_hud(&app);
-    if minimize {
-        if let Some(main) = app.get_webview_window("main") {
-            let _ = main.minimize();
-        }
-    }
-
     let cfg = Config {
         events,
         countdown_ms,
@@ -119,21 +124,31 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
         prepare_timeout_ms: PREPARE_TIMEOUT_MS,
         wait_timeout_ms: WAIT_TIMEOUT_MS,
     };
-    *app.state::<AppState>().last.lock().unwrap() = None;
+    let id = state.current.fetch_add(1, Ordering::SeqCst) + 1;
+    *state.last.lock().unwrap() = None;
     let handle = app.clone();
     let (control, worker) = spawn_session(cfg, move |update| {
+        let st = handle.state::<AppState>();
+        if st.current.load(Ordering::SeqCst) != id {
+            return; // an older session, already replaced
+        }
         let done = matches!(update.phase.as_str(), "completed" | "stopped" | "failed");
-        let event = UpdateEvent { update: &update, shortcut_registered };
-        *handle.state::<AppState>().last.lock().unwrap() = serde_json::to_value(&event).ok();
+        let event = UpdateEvent { update: &update, shortcut_registered, session };
+        *st.last.lock().unwrap() = serde_json::to_value(&event).ok();
         let _ = handle.emit("external://update", event);
         if done {
+            // Under the start lock, so a Start that is just beginning keeps its shortcut and control.
+            let _starting = st.starting.lock().unwrap_or_else(|e| e.into_inner());
+            if st.current.load(Ordering::SeqCst) != id {
+                return;
+            }
             let _ = handle.global_shortcut().unregister(stop_shortcut());
-            handle.state::<AppState>().control.lock().unwrap().take();
+            st.control.lock().unwrap().take();
             let h = handle.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(6));
                 // Close the status window unless a new session has started meanwhile.
-                if h.state::<AppState>().control.lock().unwrap().is_none() {
+                if h.state::<AppState>().current.load(Ordering::SeqCst) == id {
                     if let Some(hud) = h.get_webview_window("hud") {
                         let _ = hud.close();
                     }
@@ -142,12 +157,19 @@ async fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, m
         }
     })
     .map_err(|s| serde_json::to_string(&s).unwrap_or(s.message))?;
-    *app.state::<AppState>().control.lock().unwrap() = Some(control);
+    // Stored before the status window appears, so its Stop and the shortcut work at once.
+    *state.control.lock().unwrap() = Some((id, control));
     {
-        let state = app.state::<AppState>();
         let mut workers = state.workers.lock().unwrap();
         workers.retain(|w| !w.is_finished());
         workers.push(worker);
+    }
+
+    show_hud(&app);
+    if minimize {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.minimize();
+        }
     }
     Ok(StartResult { shortcut_registered })
 }
@@ -167,7 +189,7 @@ fn external_control(app: AppHandle, command: String) -> Result<(), String> {
         other => return Err(format!("unknown command {other}")),
     };
     match app.state::<AppState>().control.lock().unwrap().as_ref() {
-        Some(c) => {
+        Some((_, c)) => {
             c.send(cmd);
             Ok(())
         }

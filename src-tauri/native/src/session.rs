@@ -2,7 +2,8 @@
 //!
 //! Lifecycle (one session):
 //!   preparing – the keyboard backend gets ready (on X11: binds symbols that aren't on the
-//!              layout). Bounded by `prepare_timeout_ms`; Stop ends it at once
+//!              layout). At most `prepare_timeout_ms`, after which the remaining symbols
+//!              are bound as they are typed; Stop ends it at once
 //!   waiting  – Typewriter still has focus; nothing is typed until the user switches away.
 //!              Bounded by `wait_timeout_ms` (then the session fails and says why)
 //!   countdown – visible countdown; switching back to Typewriter returns to `waiting`
@@ -71,7 +72,9 @@ pub struct Config {
     pub resume_countdown_ms: u64,
     /// Process id of Typewriter itself; keys are never sent to its windows.
     pub own_pid: u64,
-    /// Longest the keyboard backend may take to get ready before the session fails.
+    /// Longest the backend may spend preparing characters up front; the rest are prepared
+    /// as they are typed. (In `spawn_session` the same limit, counted from Start, also
+    /// bounds the wait for the keyboard itself, which fails the session when exceeded.)
     pub prepare_timeout_ms: u64,
     /// Longest the session waits for the user to switch to another window (including
     /// countdowns that restarted) before it fails, so it never waits silently forever.
@@ -135,6 +138,9 @@ pub struct Session<D: Desktop> {
     target: Option<WindowInfo>,
     /// Key actions actually handed to the desktop; a session that sent none never "completes".
     keys_sent: usize,
+    /// Time the last guard spent waiting for an unknown focus to settle; the schedule
+    /// moves forward by it, so the keys that fell due meanwhile don't arrive in a burst.
+    settled: Duration,
 }
 
 enum Flow {
@@ -145,7 +151,7 @@ enum Flow {
 
 impl<D: Desktop> Session<D> {
     pub fn new(cfg: Config, desktop: D, control: Control, emit: Box<dyn FnMut(Update) + Send>) -> Self {
-        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None, keys_sent: 0 }
+        Self { cfg, desktop, control, emit, index: 0, elapsed_ms: 0.0, target: None, keys_sent: 0, settled: Duration::ZERO }
     }
 
     fn total(&self) -> f64 {
@@ -179,7 +185,9 @@ impl<D: Desktop> Session<D> {
         self.update("preparing", 0.0, None, Some("Getting the keyboard ready…".into()));
         // Let the backend prepare for every character up front (on X11: bind the ones
         // that aren't on the keyboard layout), well before the first key is due.
-        // It gives up as soon as Stop is requested or the time limit is reached.
+        // This only saves time later (characters left out are bound when typed), so when
+        // the time limit is reached it stops early and the session carries on. It ends at
+        // once when Stop is requested.
         let chars = session_chars(&self.cfg.events);
         let deadline = Instant::now() + Duration::from_millis(self.cfg.prepare_timeout_ms);
         let control = self.control.clone();
@@ -194,10 +202,6 @@ impl<D: Desktop> Session<D> {
         if self.control.stop_requested() {
             self.control.take();
             return self.stop("user", None);
-        }
-        if Instant::now() >= deadline {
-            self.update("failed", 0.0, Some("prepare-timeout"), Some(prepare_timeout_message(self.cfg.prepare_timeout_ms)));
-            return "failed".into();
         }
         match self.wait_and_count_down() {
             Flow::End => return "stopped".into(),
@@ -226,13 +230,13 @@ impl<D: Desktop> Session<D> {
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
-                    self.update("stopped", 0.0, Some("user"), None);
+                    self.stop("user", None);
                     return Flow::End;
                 }
                 _ => {}
             }
             if self.desktop.failsafe_triggered() {
-                self.update("stopped", 0.0, Some("failsafe"), Some("Stopped: mouse moved to the top-left corner.".into()));
+                self.stop("failsafe", Some("Stopped: mouse moved to the top-left corner.".into()));
                 return Flow::End;
             }
             if waiting_since.elapsed() >= Duration::from_millis(self.cfg.wait_timeout_ms) {
@@ -286,10 +290,15 @@ impl<D: Desktop> Session<D> {
     fn guard(&mut self) -> Option<(&'static str, String)> {
         let target = self.target.clone()?;
         let mut focused = self.desktop.focused_window();
-        let t0 = Instant::now();
-        while focused.is_none() && t0.elapsed() < FOCUS_SETTLE {
-            std::thread::sleep(Duration::from_millis(20));
-            focused = self.desktop.focused_window();
+        if focused.is_none() {
+            // Often a momentary blip while windows change; give it a moment to settle
+            // (unless Stop was pressed: the pause below then ends at once).
+            let t0 = Instant::now();
+            while focused.is_none() && t0.elapsed() < FOCUS_SETTLE && !self.control.stop_requested() {
+                std::thread::sleep(Duration::from_millis(20));
+                focused = self.desktop.focused_window();
+            }
+            self.settled = t0.elapsed();
         }
         match focused {
             None => return Some(("focus-unknown", "Lost track of the focused window. Paused to be safe.".into())),
@@ -359,7 +368,9 @@ impl<D: Desktop> Session<D> {
                 std::thread::sleep(TICK);
             }
             anchor += held_since.elapsed();
-            if let Some((reason, msg)) = self.guard() {
+            let guard = self.guard();
+            anchor += std::mem::take(&mut self.settled);
+            if let Some((reason, msg)) = guard {
                 self.elapsed_ms = (anchor.elapsed().as_secs_f64() * 1000.0).min(due);
                 if self.pause(reason, msg, &mut anchor).is_none() {
                     return "stopped".into();
@@ -395,6 +406,7 @@ impl<D: Desktop> Session<D> {
     }
 
     fn stop(&mut self, reason: &str, message: Option<String>) -> String {
+        let message = message.or_else(|| (self.keys_sent == 0).then(|| "Stopped before typing began. Nothing was typed.".to_string()));
         self.update("stopped", 0.0, Some(reason), message);
         "stopped".into()
     }

@@ -60,8 +60,8 @@ Every stage has a time limit and ends with an explanation. Nothing is typed in a
 
 | What you see | Why | What to do |
 |---|---|---|
-| "Typewriter couldn't get the keyboard ready within 15 seconds, so nothing was typed" | Preparing the keyboard took too long (for example, the previous session was still cleaning up). | Wait a few seconds and press **Type into app** again. If it keeps happening, restart Typewriter. |
-| "Typewriter couldn't start typing: the typing engine didn't get ready within 20 seconds" | The app's own safety net: the typing engine never answered. | Same as above. |
+| "Typewriter couldn't get the keyboard ready within 15 seconds, so nothing was typed" | The keyboard didn't become available in time (for example, the previous session was still cleaning up). | Wait a few seconds and press **Type into app** again. If it keeps happening, restart Typewriter. |
+| "Typewriter couldn't start typing: the typing engine didn't respond within 20 seconds" | The app's own safety net: the typing engine never answered. | Same as above. |
 | "Typewriter can't tell which window is active, so it won't type yet" (while waiting) | The system won't say which window has focus. On Windows this happens with apps running as administrator. | Click into your document. If the message stays, that app can't receive typing from Typewriter: use a different app. |
 | "Nothing was typed: no other window was chosen within 3 minutes" | You didn't click into another window after pressing Start. | Press **Type into app** again, then click into your document. |
 | "No keys were sent, so nothing was typed" | No key could be sent. A finished session is never reported as done when nothing was sent. | Check the target app, then try again. |

@@ -70,8 +70,28 @@ async function check(name, fn) {
   } catch (e) {
     failures++;
     console.log(`  ✘ ${name}\n    ${String(e?.message ?? e).split("\n").join("\n    ")}`);
+    await diagnose();
     shot(`win-failed-${failures}`);
   }
+}
+
+/** What the app, the status window and Windows report after a failure, so a CI log alone explains it. */
+async function diagnose() {
+  const lines = [];
+  const add = async (label, fn) => {
+    try {
+      lines.push(`${label}: ${JSON.stringify(await fn())}`);
+    } catch (e) {
+      lines.push(`${label}: (unavailable: ${String(e?.message ?? e).split("\n")[0]})`);
+    }
+  };
+  if (sid) {
+    await add("app", () => ui(`__tw.state()`, 5000));
+    await add("status window", () => hud());
+  }
+  await add("foreground window", () => ps("input.ps1", "fg"));
+  for (const key of Object.keys(targets)) await add(`${key} text`, () => read(key));
+  console.log(`    diagnostics:\n      ${lines.join("\n      ")}`);
 }
 
 // ---------------------------------------------------------------- WebDriver

@@ -8,11 +8,13 @@ function fakeBridge(opts: { failStart?: string; clipboard?: string } = {}) {
   const calls: string[] = [];
   let push: (u: NativeUpdate) => void = () => {};
   let started: TypingEvent[] = [];
+  const tokens: (number | undefined)[] = [];
   const bridge: Bridge = {
     support: async () => ({ available: true, state: "ok", platform: "linux", message: "ok" }),
-    start: async (events) => {
+    start: async (events, _countdown, _minimize, _source, token) => {
       calls.push("start");
       started = events;
+      tokens.push(token);
       if (opts.failStart) throw opts.failStart;
       return { shortcutRegistered: true };
     },
@@ -26,7 +28,7 @@ function fakeBridge(opts: { failStart?: string; clipboard?: string } = {}) {
       return () => {};
     },
   };
-  return { bridge, calls, push: (u: Partial<NativeUpdate>) => push({ phase: "typing", index: 0, elapsedMs: 0, totalMs: 0, countdownMs: 0, target: null, reason: null, message: null, ...u }), events: () => started };
+  return { bridge, calls, push: (u: Partial<NativeUpdate>) => push({ phase: "typing", index: 0, elapsedMs: 0, totalMs: 0, countdownMs: 0, target: null, reason: null, message: null, ...u }), events: () => started, tokens };
 }
 
 const TEXT = "I recieve teh mail.\nSecond line 👍🏽 with a\ttab.";
@@ -221,6 +223,42 @@ describe("external output adapter", () => {
     f.push({ phase: "failed", reason: "nothing-sent", message: "Nothing was typed." });
     expect(c.getStatus()).toBe("error");
     expect(c.getSnapshot().external?.verification).toBe("not-run");
+  });
+
+  it("a late update from a session stopped before typing can't take over the next session", async () => {
+    const f = fakeBridge();
+    const d = deferredStart(f.bridge);
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    c.stop(); // settles at once; the first engine session reports "stopped" later
+    d.resolve();
+    await flush();
+    expect(c.start()).toBe(true);
+    await flush();
+    const [first, second] = f.tokens;
+    expect(first).not.toBe(second);
+    f.push({ phase: "stopped", reason: "user", session: first });
+    expect(c.getStatus()).toBe("playing");
+    expect(c.getSnapshot().external?.phase).toBe("preparing");
+    // The new session's own updates still arrive.
+    f.push({ phase: "waiting", session: second });
+    expect(c.getSnapshot().external?.phase).toBe("waiting");
+    f.push({ phase: "typing", index: 3, elapsedMs: 100, session: second });
+    expect(c.getSnapshot().eventIndex).toBe(3);
+  });
+
+  it("an engine that answers isn't cut off by the start limit while it prepares", async () => {
+    vi.useFakeTimers();
+    const f = fakeBridge();
+    const c = new ExternalController(f.bridge);
+    c.load(TEXT, timeline());
+    c.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    f.push({ phase: "preparing", message: "Setting up 40 of 200 characters that aren't on your keyboard…", session: f.tokens[0] });
+    await vi.advanceTimersByTimeAsync(START_LIMIT_MS * 2);
+    expect(c.getStatus()).toBe("playing");
+    expect(f.calls).not.toContain("stop");
   });
 
   it("ignores stale updates when nothing is running", () => {
