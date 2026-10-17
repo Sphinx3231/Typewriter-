@@ -11,6 +11,7 @@ import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } fro
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { buildDefines } from "./scripts/build-info.mjs";
 
 const TEST = process.env.EXTENSION_TEST === "1";
 const outDir = TEST ? "dist-extension-test" : "dist-extension";
@@ -39,6 +40,7 @@ function extensionFiles(): Plugin {
 export default defineConfig({
   plugins: [react(), extensionFiles()],
   base: "./",
+  define: buildDefines(),
   build: {
     outDir,
     emptyOutDir: true,

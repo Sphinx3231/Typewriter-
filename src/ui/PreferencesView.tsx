@@ -5,6 +5,7 @@ import type { Session } from "../state/useSession";
 import type { ThemePreference } from "../theme/theme";
 import { Button, ConfirmButton, Field, Segmented, Switch, useToast } from "./controls";
 import { LogoMark } from "./Logo";
+import { APP_COMMIT, APP_VERSION } from "../build";
 
 const SHORTCUTS: [string, string][] = [
   ["Ctrl / ⌘ + Enter", "Start, or start again"],
@@ -156,9 +157,12 @@ export function PreferencesView({
         <LogoMark size={40} />
         <div>
           <h2 className="panel__title" id="prefs-about">
-            Typewriter 1.0
+            Typewriter {APP_VERSION}
           </h2>
           <p className="panel__sub">Type naturally. Write effortlessly. Runs entirely in your browser.</p>
+          <p className="panel__sub" data-testid="build-id">
+            Build {APP_COMMIT}
+          </p>
         </div>
       </section>
     </div>

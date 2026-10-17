@@ -18,17 +18,27 @@ Use a **private test document** with nothing important in it.
    - macOS (Apple Silicon): open the `.dmg`, drag Typewriter to Applications, then
      right-click › **Open** the first time (unsigned).
    - Linux: install the `.deb`, or run the `.AppImage`.
-3. If an older Typewriter is installed, quit it first (also from the tray), then install over it.
+3. **Remove the old version first.** Quit Typewriter (also from the tray icon), then uninstall it
+   (Windows: Settings › Apps › Typewriter › Uninstall; macOS: drag it from Applications to the Trash).
+   Then install the new one.
+4. **Check you are running the fixed build:** open Typewriter › **Settings** › scroll to the bottom.
+   It must say **Typewriter 1.1.1** and **Build** followed by a 7-character code. If it says
+   "Typewriter 1.0" or anything else, the old app is still the one running: don't test, send a
+   screenshot of that section instead.
 
 **Chrome extension** (unpacked, nothing is published):
-1. Build it: `npm ci && npm run extension:build` (the folder is `dist-extension/`), or unzip
-   `release/typewriter-extension-1.1.0.zip` from that build.
+1. Get it: **Actions** › **CI** › the latest run for branch `ccr-e747ce8b-l498oo` › download
+   `typewriter-chrome-extension`, and unzip `typewriter-extension-1.1.1.zip` into a new folder.
+   (Or build it yourself: `npm ci && npm run extension:build`; the folder is `dist-extension/`.)
 2. `chrome://extensions` › turn on **Developer mode** › if an older Typewriter is listed,
-   **Remove** it › **Load unpacked** › choose `dist-extension`.
+   **Remove** it › **Load unpacked** › choose that folder.
 3. Chrome shows that Typewriter can use the debugger. That's expected: it's how it sends
    real key presses.
+4. **Check the version:** the Typewriter card in `chrome://extensions` must say **1.1.1**, and
+   the panel's **Settings** tab must say **Typewriter 1.1.1** and a **Build** code.
 
-Send back: your operating system and version, and Chrome's version (`chrome://version`).
+Send back: your operating system and version, Chrome's version (`chrome://version`), and the
+**Build** code from Settings (desktop app and extension).
 
 ## 1. Desktop: typing starts and delivers characters (Bug 1)
 
