@@ -108,6 +108,10 @@ Use the same text with a 60 s duration.
 | 2.9 | Windows only: open Notepad **as administrator**, start a session and click into it. | It doesn't type; the status window explains it can't type into that window, or that focus can't be read. It never says "done". |
 | 2.10 | macOS only: turn Typewriter's Accessibility permission **off** (System Settings › Privacy & Security › Accessibility), then press Type into app. | It explains the permission and types nothing. |
 | 2.11 | A long text: paste ~2,000 characters, 60 s. | Arrives exactly (check with **Check copied text**). |
+| 2.12 | Start, then wait 2 s before clicking into the document. | The countdown starts again from your click (watch the status window): nothing is typed before a full countdown after the click, and the first letters aren't missing. |
+| 2.13 | In Opera (or Chrome), type into a Google Doc; mid-session press **Ctrl+Tab** (or click another tab), wait 5 s, then go back to the Doc's tab. | The status window says "You switched tabs, so typing is waiting". Nothing appears in the other tab. Back in the Doc's tab, a 3-second countdown runs and typing continues by itself; the final text is exact. |
+| 2.14 | Start a session (Typewriter minimizes itself). After it ends, right-click Typewriter in the taskbar › **Close window**. | Typewriter comes back to the front with "Quit Typewriter?". **Quit** closes it; nothing is left running (Task Manager shows no Typewriter). |
+| 2.15 | Close Typewriter with its own **X** while the status window is showing. | The status window closes with it. |
 
 Send back: pass/fail per row, and a screenshot of anything that didn't match.
 
