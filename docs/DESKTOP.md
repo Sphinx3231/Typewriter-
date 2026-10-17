@@ -50,14 +50,28 @@ The build is reproducible from the lockfiles (`package-lock.json`, `src-tauri/Ca
 1. Open your document and put it where you can reach it.
 2. In Typewriter, paste your text, then choose a duration or speed and the realism settings.
 3. Under **Session settings › Output**, choose **Into another app**. The panel says whether typing is available on this computer and, if not, why.
-4. Press **Type into app**. Typewriter minimises itself (you can turn this off), and a small **status window** stays on top.
+4. Press **Type into app**. Typewriter minimises itself (you can turn this off), and a small **status window** stays on top. It first says **Getting ready** while the keyboard is prepared (usually well under a second; a text with many symbols that aren't on your keyboard takes longer on Linux, and the window counts them).
 5. Click into your document **exactly where the text should start**.
 6. A countdown runs (5 seconds by default; you can set 2–30). When it ends, Typewriter types into the window you clicked into.
+
+### If typing doesn't start
+
+Every stage has a time limit and ends with an explanation. Nothing is typed in any of these cases:
+
+| What you see | Why | What to do |
+|---|---|---|
+| "Typewriter couldn't get the keyboard ready within 15 seconds, so nothing was typed" | Preparing the keyboard took too long (for example, the previous session was still cleaning up). | Wait a few seconds and press **Type into app** again. If it keeps happening, restart Typewriter. |
+| "Typewriter couldn't start typing: the typing engine didn't get ready within 20 seconds" | The app's own safety net: the typing engine never answered. | Same as above. |
+| "Typewriter can't tell which window is active, so it won't type yet" (while waiting) | The system won't say which window has focus. On Windows this happens with apps running as administrator. | Click into your document. If the message stays, that app can't receive typing from Typewriter: use a different app. |
+| "Nothing was typed: no other window was chosen within 3 minutes" | You didn't click into another window after pressing Start. | Press **Type into app** again, then click into your document. |
+| "No keys were sent, so nothing was typed" | No key could be sent. A finished session is never reported as done when nothing was sent. | Check the target app, then try again. |
+
+**Stop and Cancel work in every stage,** including **Getting ready**. Ctrl+Shift+Space works from the moment the status window appears.
 
 ### The status window
 
 The status window shows:
-- the session state (waiting, countdown, typing, paused, resuming, done, stopped, failed);
+- the session state (getting ready, waiting, countdown, typing, paused, resuming, done, stopped, failed);
 - the target window, percent done and time left;
 - **Pause**, **Resume** and **Stop** buttons.
 
@@ -152,9 +166,10 @@ Typewriter asks for nothing else: no network access, no screen recording, no inp
 
   The session tests also run on Windows and macOS in CI.
 - **Text integrity (`npm test`):** 14 tricky inputs × 4 realism settings × 5 seeds. Both the typed result and the keys sent must reproduce the source exactly.
-- **Desktop end-to-end (`npm run test:desktop`):** the real packaged app, on a real X11 display (Xvfb + openbox), types into a real Chromium window. WebDriver drives Typewriter's UI; xdotool plays the user (clicks, window switches, shortcut presses); the document is read back over the DevTools protocol. Nothing in the input path is mocked. 20 checks:
+- **Desktop end-to-end (`npm run test:desktop`):** the real packaged app, on a real X11 display (Xvfb + openbox), types into a real Chromium window. WebDriver drives Typewriter's UI; xdotool plays the user (clicks, window switches, shortcut presses); the document is read back over the DevTools protocol. Nothing in the input path is mocked. 21 checks:
   - startup and logo; theme switching, persistence and real repainting;
   - nothing typed while Typewriter has focus;
+  - Cancel while the keyboard is still being prepared types nothing, removes the temporary key bindings, and the next session types exactly;
   - exact Unicode/typo text; punctuation and spacing edge cases;
   - more distinct symbols than free key codes; back-to-back sessions;
   - 1,500 characters in 12 s;

@@ -28,9 +28,7 @@ Requirements: desktop Chrome 116 or newer on Windows, macOS, Linux or ChromeOS. 
 2. Click the Typewriter icon to open the side panel next to it.
 3. Paste your text and choose the duration or speed, mistakes and correction style.
 4. In **Session settings › Output**, choose **Into a web page**.
-5. Press **Type into page**.
-   - The first time, Chrome asks to allow the **debugger** permission. Choose **Allow**.
-   - If you refuse, nothing is typed and Typewriter explains why.
+5. Press **Type into page**. There is no permission prompt at this point: the `debugger` permission was accepted when the extension was installed (see below).
 6. Click in the document **exactly where the text should start**.
 7. A countdown runs (5 s by default; 2–30 s can be set). Then the text is typed there.
 
@@ -59,8 +57,10 @@ No content scripts are injected, and Typewriter asks for **no website access** (
 | Permission | When | Why |
 |---|---|---|
 | `sidePanel` | at install | Show Typewriter in Chrome's side panel. |
-| `debugger` (optional) | the first time you press **Type into page** | Send real key presses to the one tab you're typing into. Chrome's prompt describes this permission broadly (it can read and change data on websites), because the debugger is powerful. Typewriter only uses it as described above. You can remove it any time from the extension's details page. |
+| `debugger` | at install | Send real key presses to the one tab you're typing into. Chrome describes this permission broadly (it can read and change data on websites), because the debugger is powerful. Typewriter only uses it as described above. |
 | `clipboardRead` (optional) | the first time you press **Check copied text** | Read the text you copied from your document, to compare it with your original. |
+
+**Why `debugger` is required, not optional.** Chrome doesn't allow `debugger` to be an optional permission: `chrome.permissions.request` rejects it with *"Only permissions specified in the manifest may be requested"*, and no prompt ever appears. Version 1.1.0 listed it as optional, so the shipped build could never type (the automated tests had used a build that pre-granted it, which hid the problem). It is now a normal install-time permission. If it's ever missing, **Type into page** types nothing and says how to reinstall.
 
 ## Safety rules
 
@@ -110,12 +110,12 @@ The tests load the unpacked extension into real Chromium and type into real page
 
 They also cover every safety rule above, pause/resume/stop, the stop shortcut, long text, Unicode, the theme and logo in a narrow panel, and the release build and ZIP.
 
-Automated browsers can't click Chrome's permission prompt, so these tests use a **test build** (`dist-extension-test/`) where `debugger` and `clipboardRead` are granted at install. The release build is tested separately to load correctly, with `debugger` *not* granted. The refused-permission path is covered by unit tests.
+Automated browsers can't click Chrome's permission prompt, so most tests use a **test build** (`dist-extension-test/`) where the optional `clipboardRead` is granted at install. The **release build** (nothing pre-granted) is tested on its own: it loads with `debugger` and `sidePanel` granted, and it types into a page exactly. A manifest unit test fails if any permission Chrome refuses to make optional (such as `debugger`) is listed as optional.
 
 ## Not verified
 
 - **Typing into an actual Google Docs document has not been tested.** This environment has no Google account. The mechanism is the one Google Docs accepts from a keyboard, trusted input events, and it works in the strict stand-in, but that's not the same as running it in Docs. Please check with **Check copied text** the first time.
-- **The real toolbar click and side panel.** Automation can't click Chrome's toolbar. The tests confirm the panel is set to open on the icon click, then open the same page in a window of side-panel width.
+- **The real toolbar click and side panel** were checked by hand-driven real input on Linux (Chromium 141 on a virtual X display, real mouse clicks through the puzzle menu, the release build from `dist-extension/`). On a fresh load and after a full browser restart, the side panel showed the complete UI with no console errors, typed into a page exactly, and Pause, Resume, Stop and Alt+Shift+. worked. Playwright's tests can't click the toolbar, so they open the same page in a window of side-panel width.
 - **Windows, macOS and ChromeOS.** Tested on Linux only.
 
 ## Known limitations
