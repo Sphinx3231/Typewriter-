@@ -145,8 +145,16 @@ const targets = {};
 async function openTarget(key, title, x, y) {
   const out = join(work, `${key}.txt`);
   writeFileSync(out, "");
-  procs.push(spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(here, "win", "target.ps1"), "-Out", out, "-Title", title, "-X", String(x), "-Y", String(y)], { stdio: "ignore" }));
-  const rect = await until(async () => ps("input.ps1", "find", title) || null, 20000, `the "${title}" window`);
+  const log = [];
+  const p = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(here, "win", "target.ps1"), "-Out", out, "-Title", title, "-X", String(x), "-Y", String(y)], { stdio: ["ignore", "pipe", "pipe"] });
+  p.stdout.on("data", (d) => log.push(String(d)));
+  p.stderr.on("data", (d) => log.push(String(d)));
+  p.on("exit", (code) => log.push(`(exited with code ${code})`));
+  procs.push(p);
+  const rect = await until(async () => ps("input.ps1", "find", title) || null, 20000, `the "${title}" window`).catch((e) => {
+    shot(`win-00-no-${key}-window`);
+    throw new Error(`${e.message}\n    target.ps1 output: ${log.join("").trim() || "(none)"}`);
+  });
   const [rx, ry, rw, rh] = rect.split(" ").map(Number);
   targets[key] = { out, title, x: rx, y: ry, w: rw, h: rh };
 }

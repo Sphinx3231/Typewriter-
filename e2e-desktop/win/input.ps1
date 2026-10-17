@@ -50,7 +50,12 @@ switch ($Cmd) {
     $s.ToString()
   }
   "find" {
-    $h = [TwInput]::FindWindow($null, $A)
+    # [NullString]: PowerShell would pass $null as "" (no window has class ""), and find nothing.
+    $h = [TwInput]::FindWindow([NullString]::Value, $A)
+    if ($h -eq [IntPtr]::Zero) {
+      $p = Get-Process | Where-Object { $_.MainWindowTitle -eq $A } | Select-Object -First 1
+      if ($p) { $h = $p.MainWindowHandle }
+    }
     if ($h -ne [IntPtr]::Zero -and [TwInput]::IsWindowVisible($h)) {
       $r = New-Object TwInput+RECT
       [TwInput]::GetWindowRect($h, [ref]$r) | Out-Null
