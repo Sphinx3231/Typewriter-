@@ -307,7 +307,15 @@ impl<D: Desktop> Session<D> {
             None => return Some(("focus-unknown", "Lost track of the focused window. Paused to be safe.".into())),
             Some(w) if self.is_own(&w) => return Some(("focus-typewriter", "Typewriter has focus, so typing paused. It never types into itself.".into())),
             Some(w) if !w.same_window(&target) => {
-                return Some(("focus-changed", format!("Focus moved to \"{}\", so typing paused.", w.title)));
+                // Some windows (pop-ups, overlays) have no title: name the app instead.
+                let name = if !w.title.trim().is_empty() {
+                    w.title.clone()
+                } else if !w.app_name.trim().is_empty() {
+                    w.app_name.clone()
+                } else {
+                    "another window".into()
+                };
+                return Some(("focus-changed", format!("Focus moved to \"{name}\", so typing paused.")));
             }
             Some(w) => {
                 if let Some(why) = sensitive_title(&w.title) {

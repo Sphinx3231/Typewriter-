@@ -237,6 +237,20 @@ fn focus_moving_during_the_password_check_sends_nothing_to_the_new_window() {
 }
 
 #[test]
+fn a_pause_for_an_untitled_window_names_its_app() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let r = start(&fake, events_for(&"x".repeat(200), 4.0), 20);
+    thread::sleep(Duration::from_millis(150));
+    fake.focus(WindowInfo { window_id: "popup".into(), process_id: 77, app_name: "Google Chrome".into(), title: "".into() });
+    assert!(wait_for_phase(&r, "paused", 1000));
+    let msg = r.updates.lock().unwrap().iter().rev().find(|u| u.phase == "paused").unwrap().message.clone().unwrap_or_default();
+    assert_eq!(msg, "Focus moved to \"Google Chrome\", so typing paused.");
+    r.control.send(Command::Stop);
+    r.handle.join().unwrap();
+}
+
+#[test]
 fn focus_change_pauses_and_resume_continues_exactly() {
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));

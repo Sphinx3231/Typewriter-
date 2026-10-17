@@ -262,7 +262,7 @@ const BROWSERS = [
 /** Evaluates an expression in the browser page whose URL contains `urlPart`. */
 async function cdpEval(port, urlPart, expression) {
   const list = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
-  const t = list.find((x) => x.type === "page" && x.url.includes(urlPart));
+  const t = list.find((x) => (x.type === "page" || x.type === "service_worker") && x.url.includes(urlPart));
   if (!t) throw new Error(`no page with ${urlPart} (pages: ${list.map((x) => x.url).join(", ")})`);
   const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((ok, fail) => ((ws.onopen = ok), (ws.onerror = () => fail(new Error("DevTools connection failed")))));
@@ -329,6 +329,55 @@ async function browserCheck(name, exe, port) {
     const rejected = await cdpEval(port, "strict-editor", "model.rejected");
     assert(rejected === 0, `${name} received ${rejected} untrusted (script-made) events`);
     assert(got === TRICKY, `final text in ${name} differs.\n    want ${JSON.stringify(TRICKY)}\n    got  ${JSON.stringify(got)}`);
+  } finally {
+    p.kill();
+    try {
+      execFileSync("taskkill", ["/PID", String(p.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+async function operaExtensionCheck(exe, ext, port) {
+  const profile = mkdtempSync(join(tmpdir(), "tw-opera-ext-"));
+  const p = spawn(
+    exe,
+    [
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${port}`,
+      "--remote-allow-origins=*",
+      "--no-first-run",
+      "--no-default-browser-check",
+      `--load-extension=${ext}`,
+      "--disable-features=DisableLoadExtensionCommandLineSwitch",
+      "--window-position=60,40",
+      "--window-size=960,640",
+      "about:blank",
+    ],
+    { stdio: "ignore" },
+  );
+  procs.push(p);
+  try {
+    const sw = await until(async () => {
+      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+      return list.find((x) => x.type === "service_worker" && x.url.startsWith("chrome-extension://") && x.url.endsWith("/background.js"));
+    }, 30000, "Typewriter's service worker in Opera (the unpacked extension didn't load)");
+    const id = new URL(sw.url).host;
+    const apis = await cdpEval(port, sw.url, `JSON.stringify({ sidePanel: typeof chrome.sidePanel, debugger: typeof chrome.debugger, opr: typeof opr, sidebarAction: typeof (globalThis.opr && opr.sidebarAction), ua: navigator.userAgent })`);
+    console.log(`    Opera extension APIs: ${apis}`);
+    // Open the panel page in a tab, the way a side panel would load it.
+    await fetch(`http://127.0.0.1:${port}/json/new?chrome-extension://${id}/index.html`, { method: "PUT", signal: AbortSignal.timeout(5000) });
+    const ui = await until(
+      () => cdpEval(port, `chrome-extension://${id}/index.html`, `document.querySelector('[data-testid="btn-start"]') ? document.body.innerText.slice(0, 80) : null`),
+      15000,
+      "the panel page to render in Opera",
+    );
+    console.log(`    panel page renders: ${JSON.stringify(ui)}`);
+    shot("win-opera-extension-page");
+    const a = JSON.parse(apis);
+    assert(a.sidePanel === "object", `chrome.sidePanel is ${a.sidePanel} in Opera, so the side panel can't open (Opera's own sidebar API: ${a.sidebarAction})`);
+    assert(a.debugger === "object", `chrome.debugger is ${a.debugger} in Opera, so the extension can't type`);
   } finally {
     p.kill();
     try {
@@ -455,6 +504,15 @@ async function main() {
       continue;
     }
     await check(`types into a Google-Docs-like page in ${name}, exactly`, () => browserCheck(name, exe, port++));
+  }
+
+  // The Chrome extension in Opera: Opera supports only part of Chrome's extension APIs.
+  const opera = BROWSERS.find(([n]) => n === "Opera")[1].find((x) => existsSync(x));
+  const ext = resolve(here, "../dist-extension");
+  if (opera && existsSync(join(ext, "manifest.json"))) {
+    await check("the Chrome extension in Opera: the APIs it needs exist and its panel page renders", () => operaExtensionCheck(opera, ext, port++));
+  } else {
+    console.log(`  - the Chrome extension in Opera: skipped (${opera ? "dist-extension not built" : "Opera isn't installed"})`);
   }
 
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});

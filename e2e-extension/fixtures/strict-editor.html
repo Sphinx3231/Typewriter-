@@ -47,6 +47,8 @@
         else if (e.key === "ArrowLeft") model.caret = Math.max(0, model.caret - 1);
         else if (e.key === "ArrowRight") model.caret = Math.min(model.cells.length, model.caret + 1);
         else if (e.key === "Enter") insert("\n");
+        // Like Google Docs, a Tab key press inserts a tab instead of moving focus.
+        else if (e.key === "Tab" && !e.shiftKey) insert("\t");
         else return;
         e.preventDefault();
         draw();

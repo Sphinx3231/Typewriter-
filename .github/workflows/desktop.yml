@@ -82,6 +82,8 @@ jobs:
           cargo install --git https://github.com/chippers/msedgedriver-tool
           & "$HOME/.cargo/bin/msedgedriver-tool.exe"
           $PWD.Path >> $env:GITHUB_PATH
+      - name: Build the Chrome extension (for the Opera check)
+        run: npx vite build -c vite.extension.config.ts
       - name: Install Opera (best effort; Chrome and Edge are preinstalled)
         continue-on-error: true
         run: choco install opera -y --no-progress
