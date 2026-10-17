@@ -10,8 +10,8 @@ pub mod session;
 pub mod xtyper;
 
 pub use keys::{Event, KeyAction, Translator, VirtualField};
-pub use platform::{check_support, Desktop, RealDesktop, Support, WindowInfo};
-pub use session::{Command, Config, Control, Session, Update};
+pub use platform::{check_support, linux_session_problem, Desktop, RealDesktop, Support, WindowInfo};
+pub use session::{session_chars, Command, Config, Control, Session, Update};
 
 /// Starts a session on its own thread using the real desktop.
 /// `emit` receives every status update; the returned `Control` steers it.

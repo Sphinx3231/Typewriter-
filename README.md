@@ -2,103 +2,98 @@
 
 **Type naturally. Write effortlessly.**
 
-Typewriter takes a block of text and types it out keystroke by keystroke, like a real person would, over the time you choose. Pauses, small rhythm changes and the odd typo come with it. Every typo is corrected on screen, and the finished text always matches what you pasted, character for character.
+Typewriter is a desktop app. Paste a block of text, choose how long it should take, and Typewriter types it out keystroke by keystroke, like a real person would. It can type in its own window, or into the app you click into (a text editor, a browser, Google Docs) with real key presses.
 
-Use it in the browser to watch the text typed in Typewriter's own window. Or use the **Chrome extension** to have it typed into a web page such as Google Docs, or the **desktop app** to type into any app, such as Word or Notes. Both type with real key presses. Everything runs on your device: no account, no server, no AI, no tracking.
+Pauses, small rhythm changes and the odd typo come with it. Every typo is corrected before the end, and the finished text always matches what you pasted, character for character.
 
-## Features
+Everything runs on your computer: no account, no server, no AI, no tracking.
 
-- **Types into web pages** (Chrome extension, in the side panel). Click into your document, and after a countdown Typewriter types there with trusted key input.
-  - Stop with the button, Alt+Shift+., or by closing the panel.
-  - It pauses if you switch tabs or fields, stops on navigation, and refuses password and hidden fields.
-  - It reads the result back where the page allows it. Google Docs can't be read back, so it says so. See [`docs/EXTENSION.md`](docs/EXTENSION.md).
-- **Types into other apps** (desktop app). Click into your document, and after a countdown Typewriter types there.
-  - Emergency stop: Ctrl+Shift+Space, or move the mouse to the top-left corner.
-  - It pauses if you switch windows, never types into itself, and refuses password and login fields.
-  - It reports "sent" until you verify the document text. See [`docs/DESKTOP.md`](docs/DESKTOP.md).
-- **Real typing playback.** A seeded engine plans every key press, pause, typo and correction, then plays it on a drift-free timeline.
-- **Your words stay yours.** The output is checked against your original at the end. Your own spelling and grammar are never "fixed".
-- **Timing by duration or speed.** Set "finish in 3 minutes" or "type at 70 WPM". The other value is worked out for you, with a breakdown of typing, pauses and corrections.
-- **Realism controls.**
-  - realistic rhythm and speed variation
-  - natural pauses
-  - typing mistakes (off, low, medium)
-  - three correction styles: autocorrect, backspace-and-retype, mixed
-  - correction delay
-  - synthesized typing sounds
-- **Full playback control.** Start, pause, resume, restart, stop and copy, with progress, elapsed and remaining time, live WPM and an estimated finish time.
-- **Two designed themes.**
-  - Light: purple, white and cyan.
-  - Dark: near-black, red and orange.
-  - Follows your system until you choose, then remembers your choice.
-- **Local-only history** of finished sessions. It keeps statistics only, never your text.
-- **Keyboard shortcuts:**
-  - `Ctrl/⌘ + Enter` starts
-  - `Space` pauses or resumes
-  - `Esc` stops
-  - `Ctrl/⌘ + Shift + C` copies
-- **Accessibility and layout.** Works on phone, tablet and desktop, with AA contrast, screen-reader announcements and reduced-motion support.
+## Install the desktop app
 
-## Chrome extension
+| System | File | Status |
+|---|---|---|
+| Linux (Debian/Ubuntu) | `Typewriter_1.1.0_amd64.deb` | Built, installed and tested end to end (X11) |
+| Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | Built, launched and tested (X11) |
+| Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | Built and inspected; not installed here |
+| Windows 10/11 | `.msi` / `-setup.exe` | Built by CI; **not run yet** |
+| macOS 11+ | `.dmg` | Built by CI; **not run yet** |
 
-Install (Load unpacked), permissions, privacy and limitations are in [`docs/EXTENSION.md`](docs/EXTENSION.md).
+Step-by-step install, permissions and the typing workflow are in [`docs/DESKTOP.md`](docs/DESKTOP.md). To build the installers yourself:
 
 ```bash
-npm run extension:build  # unpacked extension in dist-extension/, ZIP in release/
+npm ci
+npm run desktop:build   # installers in src-tauri/target/release/bundle/
 ```
 
-The extension isn't on the Chrome Web Store.
+## What it does
 
-## Desktop app
+- **Types into another app.** Press **Type into app**, click where the text should go, and after a countdown Typewriter types there.
+  - **Emergency stop:** Ctrl+Shift+Space, the mouse in the top-left corner, or **Stop** in the small status window.
+  - **Status window:** stays on top with progress, time left, and Pause/Resume/Stop.
+  - **Safety:** it pauses if you click another window, never types into itself, and refuses login and password windows.
+  - **Results:** it reports "sent" until you check the document with **Check copied text**.
+- **Your text stays exact.** Every input is checked by automated tests against the final result: punctuation, spacing, line breaks, accents, CJK, emoji, combining marks, and your own spelling.
+- **Your text isn't lost by accident.** Quitting with unsaved text, or in the middle of typing, asks first.
+- **Timing by duration or speed.** Set "finish in 3 minutes" or "type at 70 WPM"; the other value is worked out for you.
+- **Realism controls:**
+  - rhythm and speed variation;
+  - natural pauses;
+  - typing mistakes (off, low, medium);
+  - three correction styles;
+  - correction delay;
+  - synthesized typing sounds.
+- **Full control.** Start, pause, resume, stop, plus progress, elapsed and remaining time, live WPM and an estimated finish time.
+- **Two themes, both using the original dragon logo:**
+  - Light: white, blue and purple.
+  - Dark: black, red and orange.
+  - Text contrast in both is checked automatically against WCAG AA.
+- **Local-only history** (statistics only, never your text), keyboard shortcuts, and screen-reader and reduced-motion support.
 
-Install and permission steps are in [`docs/DESKTOP.md`](docs/DESKTOP.md).
+## Deferred
 
-```bash
-npm run desktop:build   # installers in src-tauri/target/release/bundle/ (deb, rpm, AppImage on Linux)
-```
+- **Chrome extension.** It is built and tested (`docs/EXTENSION.md`) and kept in the repository, but it isn't the priority.
+- **Chrome Web Store.** Not published, and not planned: the developer fee is not authorized.
 
-Windows and macOS installers are built by the **Desktop builds** GitHub Actions workflow.
-
-## Getting started
+## Development
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev            # web preview at http://localhost:5173
+npm run desktop:dev    # the desktop app, with hot reload
 ```
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Development server |
-| `npm run build` | Typecheck and production build into `dist/` |
-| `npm run preview` | Serve the production build |
-| `npm test` | Unit and fuzz tests (Vitest) |
-| `npm run test:e2e` | Browser tests (Playwright; build first) |
-| `npm run test:native` | Native typing engine tests (Rust) |
-| `npm run test:desktop` | Packaged desktop app types into a real Chromium window (Linux, X11) |
-| `npm run extension:build` | Build the Chrome extension and its ZIP |
-| `npm run test:extension` | Extension tests: real Chromium types into real pages |
-| `npm run desktop:dev` / `desktop:build` | Run the desktop app / build its installers |
-| `npm run lint` | Typecheck only |
+| `npm run lint` | Typecheck |
+| `npm test` | Unit, fuzz, text-integrity and contrast tests (Vitest) |
+| `npm run build` | Production web build into `dist/` (the desktop app's UI) |
+| `npm run test:e2e` | UI tests in Chromium (Playwright; build first) |
+| `npm run test:native` | Native typing engine and safety tests (Rust) |
+| `npx tauri build --no-bundle` | Release desktop binary only (what `test:desktop` runs) |
+| `npm run test:desktop` | The packaged app types into a real Chromium window (Linux, X11; needs Xvfb, openbox, xdotool, tauri-driver) |
+| `npm run desktop:build` | Desktop installers |
+| `npm run extension:build` / `test:extension` | Deferred Chrome extension: build / tests |
 
 ## How it works
 
 ```
-source text ──► buildScript() ──► keystroke script (timing-free, seeded)
+source text ──► buildScript() ──► keystroke script (seeded typos and corrections)
                                     │
                buildTimeline() ◄────┘  duration or WPM → event times
                      │
-            PlaybackController  (state machine + scheduler)
-                     │ applies events
-                TypedBuffer  ──► PlaybackSurface (incremental DOM)
+         ┌───────────┴────────────┐
+   in-app preview            another app (desktop)
+   PlaybackController        typewriter-native (Rust): events → keys,
+   + TypedBuffer             focus guard, failsafes, X11/Windows/macOS output
 ```
 
-- `src/engine/` is plain TypeScript with no UI:
-  - `script.ts`: keystrokes, pauses, typos, corrections
-  - `schedule.ts`: timing and conflict detection
-  - `player.ts`: states and drift-free scheduling
-  - `buffer.ts`: the visible text and caret
-- `src/ui/` holds the React components. `src/theme/tokens.css` holds every colour for both themes.
-- Product spec: [`docs/SPEC.md`](docs/SPEC.md). Current state and known limitations: [`docs/STATUS.md`](docs/STATUS.md).
+- `src/engine/`: plain TypeScript, no UI. It covers the script, timing, the playback state machine and the exact-text buffer.
+- `src-tauri/native/`: the desktop typing engine. Operating-system access sits behind one `Desktop` trait, so the session logic is tested without a desktop.
+- `src/ui/`: React components. `src/theme/tokens.css` holds every colour for both themes.
+- Docs:
+  - spec: [`docs/SPEC.md`](docs/SPEC.md)
+  - current state and limitations: [`docs/STATUS.md`](docs/STATUS.md)
+  - latest audit: [`docs/DESKTOP-AUDIT.md`](docs/DESKTOP-AUDIT.md)
 
 ## Project rules
 

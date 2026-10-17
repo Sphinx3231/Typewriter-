@@ -13,13 +13,15 @@ export interface NativeUpdate {
   target: { windowId: string; processId: number; appName: string; title: string } | null;
   reason: string | null;
   message: string | null;
+  /** Desktop: whether the emergency-stop shortcut is registered right now. */
+  shortcutRegistered?: boolean;
   /** Read-back result, when the destination could be inspected (browser extension). */
   verification?: { status: "verified" | "mismatch" | "unreadable"; detail: string };
 }
 
 export interface Support {
   available: boolean;
-  state: "ok" | "permission-denied" | "no-display" | "unsupported" | "browser";
+  state: "ok" | "permission-denied" | "no-display" | "wayland" | "unsupported" | "browser";
   platform: string;
   message: string;
 }

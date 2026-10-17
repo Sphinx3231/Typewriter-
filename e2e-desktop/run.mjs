@@ -47,7 +47,7 @@ function bg(cmd, args, extra = {}) {
 const xdo = (...args) => execFileSync("xdotool", args, { env }).toString().trim();
 
 async function check(name, fn) {
-  if (process.env.ONLY && !name.includes(process.env.ONLY)) return;
+  if (process.env.ONLY && !new RegExp(process.env.ONLY).test(name)) return;
   const t0 = Date.now();
   try {
     await fn();
@@ -160,6 +160,39 @@ async function prepare(text, { seconds, mistakes = "Medium", minimize = true, co
   await sleep(500);
 }
 const state = () => ui(`__tw.state()`);
+const editorText = () => ui(`document.getElementById("source-text").value`);
+
+/** Runs a script in the status window (HUD), then switches WebDriver back to the main window. */
+async function inHud(script) {
+  const main = await wd("GET", `/session/${sid}/window`);
+  const handles = await wd("GET", `/session/${sid}/window/handles`);
+  let out;
+  for (const h of handles) {
+    if (h === main) continue;
+    await wd("POST", `/session/${sid}/window`, { handle: h });
+    const isHud = await js(`return !!document.querySelector('[data-testid="hud"]')`).catch(() => false);
+    if (isHud) {
+      out = await js(script);
+      break;
+    }
+  }
+  await wd("POST", `/session/${sid}/window`, { handle: main });
+  return out;
+}
+const hudState = () =>
+  inHud(`const q = (t) => document.querySelector('[data-testid="' + t + '"]');
+    return { phase: q("hud") && q("hud").dataset.phase, label: q("hud-label") && q("hud-label").textContent, detail: q("hud-detail") && q("hud-detail").textContent,
+      pct: q("hud-pct") && q("hud-pct").textContent, hint: q("hud-hint") && q("hud-hint").textContent, left: q("hud-left") && q("hud-left").textContent,
+      buttons: [...document.querySelectorAll("button")].map((b) => b.dataset.testid) };`);
+/** A real mouse click on a status-window button (moves focus to the status window, like a user). */
+async function clickHud(testid) {
+  const r = await inHud(`const b = document.querySelector('[data-testid="${testid}"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+  assert(r, `status window has no ${testid} button`);
+  const id = await windowId("Typewriter status");
+  const geo = Object.fromEntries(xdo("getwindowgeometry", "--shell", id).split("\n").map((l) => l.split("=")));
+  xdo("mousemove", String(Math.round(Number(geo.X) + r.x)), String(Math.round(Number(geo.Y) + r.y)), "click", "1");
+  await sleep(150);
+}
 
 // ---------------------------------------------------------------- target windows
 let browser, page, other;
@@ -172,6 +205,11 @@ function windowId(title) {
       return null;
     }
   }, 10000, `window "${title}"`);
+}
+/** The main Typewriter window, restored first if a session minimised it (as the user would). */
+async function mainWindow() {
+  await js(`return window.__TAURI_INTERNALS__.invoke("show_main")`).catch(() => {});
+  return windowId("Typewriter$");
 }
 async function focusDoc(click = true) {
   const id = await windowId("Target Doc");
@@ -224,7 +262,7 @@ async function main() {
 
   await check("packaged app starts without a dev server, shows its window, clears the splash, and shows the right logo for its theme", async () => {
     await until(() => ui(`!document.getElementById("boot")`), 5000, "launch splash to clear");
-    await windowId("Typewriter"); // visible main window
+    await windowId("Typewriter$"); // visible main window
     const s = await state();
     assert(/logo/.test(s.logoImg), `logo image missing: ${s.logoImg}`);
     const expect = s.theme === "dark" ? "100% 0%" : "0% 0%";
@@ -243,7 +281,7 @@ async function main() {
     assert(new Set(seen).size === 2, "theme didn't alternate");
     await ui(`(__tw.click("theme-switch"), 1)`);
     const before = (await state()).theme;
-    xdo("windowactivate", "--sync", await windowId("Typewriter"));
+    xdo("windowactivate", "--sync", await mainWindow());
     await sleep(600);
     shot(`desktop-${before}`);
     await ui(`(__tw.click("theme-switch"), 1)`);
@@ -258,7 +296,7 @@ async function main() {
   });
 
   await check("the window really repaints when the theme changes (pixels, not just DOM)", async () => {
-    const id = await windowId("Typewriter");
+    const id = await mainWindow();
     xdo("windowactivate", "--sync", id);
     await sleep(500);
     const geo = Object.fromEntries(xdo("getwindowgeometry", "--shell", id).split("\n").map((l) => l.split("=")));
@@ -280,7 +318,7 @@ async function main() {
   await check("nothing is typed after arming while Typewriter still has focus", async () => {
     await resetDoc();
     await prepare("must not appear", { seconds: 3, mistakes: "Off", minimize: false, countdown: 2 });
-    const tw = await windowId("Typewriter");
+    const tw = await mainWindow();
     xdo("windowactivate", "--sync", tw);
     await ui(`(__tw.click("btn-start"), 1)`);
     await sleep(4000);
@@ -342,7 +380,7 @@ async function main() {
     await sleep(300);
     await ui(`(__tw.click("btn-verify"), 1)`);
     await until(async () => (await state()).status === "Verified", 5000, "verified");
-    xdo("windowactivate", "--sync", await windowId("Typewriter"));
+    xdo("windowactivate", "--sync", await mainWindow());
     await sleep(500);
     shot("desktop-verified");
   });
@@ -401,6 +439,7 @@ async function main() {
     await sleep(1500);
     assert((await docValue()).length === n, "typing continued after the emergency stop");
     assert(n < 400, "finished instead of stopping");
+    assert((await editorText()) === "x".repeat(400), "the source text changed after the emergency stop");
   });
 
   await check("moving the mouse to the top-left corner stops typing", async () => {
@@ -415,6 +454,7 @@ async function main() {
     const n = (await docValue()).length;
     await sleep(1000);
     assert((await docValue()).length === n, "typing continued after the failsafe");
+    assert((await editorText()) === "y".repeat(400), "the source text changed after the failsafe stop");
     xdo("mousemove", "700", "500"); // leave the corner, or the next session would stop at once
   });
 
@@ -436,15 +476,190 @@ async function main() {
     await until(async () => (await state()).status === "Stopped", 3000, "stop");
   });
 
+  await check("punctuation, spacing and Unicode edge cases arrive exactly (typos on)", async () => {
+    await resetDoc();
+    const text = [
+      "“Smart” ‘quotes’ — em – en … ellipsis; NBSP:\u00a0| two  spaces  |\ttab\tin line",
+      "Backslash \\ braces {} [] <> | ~ ^ ` %s $(echo hi) <b>not bold</b> 50% off #1 @me",
+      "e\u0301 combining, Straße, İstanbul, Ελληνικά, 中文, 👍🏽 🇯🇵",
+      "",
+      "End.",
+    ].join("\n");
+    await prepare(text, { seconds: 16, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 40000, "completion");
+    const got = await docValue();
+    assert(got === text, `document differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(text)}`);
+    assert((await editorText()) === text, "the source text changed");
+  });
+
+  await check("many different characters that aren't on the keyboard layout arrive exactly (key remapping stress)", async () => {
+    await resetDoc();
+    // More distinct off-layout symbols than there are spare key codes, so bindings are reused.
+    const symbols = "日本語中文한국어Ελληνικάαβγδ→←↑↓∑∏√∞≈≠≤≥“”‘’—–…•€£¥©®™👍🏽🎉🚀🌍❤️😀😂🤖🧪📦🔥✨🌟💡⚡";
+    const text = [...new Intl.Segmenter().segment(symbols)].map((g) => g.segment).join(" ") + "\nok";
+    await prepare(text, { seconds: 14, mistakes: "Off", minimize: true, countdown: 2 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 60000, "completion");
+    const got = await docValue();
+    assert(got === text, `document differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(text)}`);
+  });
+
+  await check("back-to-back sessions never mix up characters (the second starts while the first is still cleaning up)", async () => {
+    // More distinct off-layout symbols than spare key codes, so the first session reuses
+    // codes; the second needs the same symbols and starts while the first is cleaning up.
+    const symbols = [..."“”‘’—–…Ελληνικάβγδ中文日本語한국어→←≈∞≠≤≥✓¥€"];
+    const first = symbols.join("");
+    const second = [...symbols].reverse().join("") + " ok";
+    await resetDoc();
+    await prepare(first, { seconds: 4, mistakes: "Off", minimize: false, countdown: 2 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 30000, "first session");
+    assert((await docValue()) === first, `first: ${JSON.stringify(await docValue())}`);
+    // Start the next one at once, as with "Type again", while the document keeps focus.
+    await page.evaluate(() => {
+      document.getElementById("doc").value = "";
+    });
+    await ui(`(__tw.setText(${JSON.stringify(second)}), 1)`);
+    await sleep(150);
+    await ui(`(__tw.click("btn-start"), 1)`);
+    try {
+      await until(async () => (await state()).status === "Sent", 30000, "second session");
+    } catch (e) {
+      throw new Error(`${e.message}; state ${JSON.stringify(await state())}; doc ${JSON.stringify(await docValue())}; active "${xdo("getactivewindow", "getwindowname")}"`);
+    }
+    assert((await docValue()) === second, `second: ${JSON.stringify(await docValue())}`);
+  });
+
+  await check("status window: shows progress, time left and the stop shortcut; its Pause, Resume and Stop work with real clicks", async () => {
+    await resetDoc();
+    const text = "The status window controls a session without opening Typewriter. ".repeat(3).trim();
+    await prepare(text, { seconds: 20, mistakes: "Off", minimize: true, countdown: 2 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(400);
+    await focusDoc();
+    await until(async () => (await docValue()).length > 8, 10000, "typing");
+    const h = await until(async () => {
+      const v = await hudState();
+      return v && v.phase === "typing" && v.pct ? v : null;
+    }, 5000, "status window in the typing state");
+    assert(/\d+%/.test(h.pct), `no percentage: ${h.pct}`);
+    assert(/\d:\d\d left/.test(h.left), `time left: ${h.left}`);
+    assert(/Ctrl\+Shift\+Space/.test(h.hint), `hint: ${h.hint}`);
+    assert(h.buttons.includes("hud-pause") && h.buttons.includes("hud-stop"), `buttons: ${h.buttons}`);
+    shot("desktop-hud-typing");
+    // Pause from the status window.
+    await clickHud("hud-pause");
+    await until(async () => (await state()).status === "Paused", 3000, "pause from the status window");
+    const frozen = await docValue();
+    await sleep(1200);
+    assert((await docValue()) === frozen, "kept typing while paused");
+    const hp = await hudState();
+    assert(hp.phase === "paused" && hp.buttons.includes("hud-resume"), `paused status window: ${JSON.stringify(hp)}`);
+    shot("desktop-hud-paused");
+    // Resume from the status window, then click back into the document.
+    await clickHud("hud-resume");
+    await sleep(400);
+    await focusDoc(false);
+    await until(async () => (await docValue()).length > frozen.length, 10000, "typing to continue after resume");
+    // Stop from the status window.
+    await clickHud("hud-stop");
+    await until(async () => (await state()).status === "Stopped", 3000, "stop from the status window");
+    const n = (await docValue()).length;
+    await sleep(1200);
+    assert((await docValue()).length === n && n < text.length, "typing continued after Stop");
+    assert(text.startsWith(await docValue()), "the document holds something other than the start of the text");
+    assert((await editorText()) === text, "the source text changed");
+    const hs = await hudState();
+    assert(hs.phase === "stopped" && hs.buttons.includes("hud-open"), `stopped status window: ${JSON.stringify(hs)}`);
+  });
+
   await check("in-app preview still works in the desktop app", async () => {
     await resetDoc();
+    xdo("windowactivate", "--sync", await mainWindow());
     await ui(`(__tw.radio("Where to type", "Preview here"), 1)`);
     await ui(`(__tw.setText("Preview check."), 1)`);
+    await ui(`(__tw.radio("Set the timing by", "Total duration"), 1)`);
+    await sleep(150);
+    await ui(`(__tw.number(document.querySelector('[aria-label="Minutes"]'), 0), 1)`);
+    await ui(`(__tw.number(document.querySelector('[aria-label="Seconds"]'), 3), 1)`);
     await sleep(400);
     await ui(`(__tw.click("btn-start"), 1)`);
     await until(async () => (await state()).status === "Complete", 20000, "preview completion");
     assert((await ui(`document.querySelector('[data-testid="playback-text"]').textContent`)) === "Preview check.", "preview output");
     assert((await docValue()) === "", "preview typed into another app");
+  });
+
+  await check("closing with unsaved text asks first; Keep keeps the app and the text", async () => {
+    await ui(`(__tw.radio("Where to type", "Preview here"), 1)`);
+    await ui(`(__tw.setText("Unsaved words that must not vanish."), 1)`);
+    await sleep(500);
+    const id = await mainWindow();
+    xdo("windowactivate", "--sync", id);
+    xdo("key", "--clearmodifiers", "alt+F4");
+    await until(() => ui(`!!document.querySelector('[data-testid="quit-dialog"]')?.open`), 5000, "quit confirmation");
+    assert(await ui(`!!document.querySelector('[data-testid="quit-unsaved"]')`), "no unsaved-text warning");
+    shot("desktop-quit-dialog");
+    await ui(`(__tw.click("quit-keep"), 1)`);
+    await sleep(800);
+    assert(!(await ui(`document.querySelector('[data-testid="quit-dialog"]').open`)), "dialog still open");
+    assert((await editorText()) === "Unsaved words that must not vanish.", "text lost");
+    await mainWindow(); // still running
+  });
+
+  await check("quitting mid-typing asks, then stops typing at once and exits", async () => {
+    await resetDoc();
+    await prepare("z".repeat(400), { seconds: 30, mistakes: "Off", minimize: false, countdown: 2 });
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await docValue()).length > 5, 10000, "typing");
+    const id = await mainWindow();
+    xdo("windowactivate", "--sync", id); // Typewriter takes focus: typing pauses
+    xdo("key", "--clearmodifiers", "alt+F4");
+    await until(() => ui(`!!document.querySelector('[data-testid="quit-dialog"]')?.open`), 5000, "quit confirmation");
+    assert(await ui(`!!document.querySelector('[data-testid="quit-running"]')`), "no running-session warning");
+    await ui(`(__tw.click("quit-confirm"), 1)`).catch(() => {}); // the window goes away mid-call
+    await until(() => {
+      try {
+        xdo("search", "--name", "^Typewriter");
+        return false;
+      } catch {
+        return true;
+      }
+    }, 8000, "Typewriter windows to close");
+    const n = (await docValue()).length;
+    await sleep(1500);
+    assert((await docValue()).length === n && n < 400, "typing continued after quitting");
+    sid = null;
+  });
+
+  await check("on a Wayland session it explains the limit and won't start typing into other apps", async () => {
+    for (const p of procs.filter((p) => p.spawnargs[0] === "tauri-driver")) p.kill("SIGTERM");
+    await sleep(800);
+    // GTK still draws on Xvfb (GDK_BACKEND=x11); the native check sees a Wayland session.
+    bg("tauri-driver", ["--port", "4444"], { env: { ...env, WAYLAND_DISPLAY: "wayland-0" } });
+    await until(() => fetch(`${WD}/status`).then((r) => r.ok).catch(() => false), 15000, "tauri-driver");
+    await openApp();
+    await ui(`(__tw.setText("Wayland check."), 1)`);
+    await ui(`(__tw.radio("Where to type", "Into another app"), 1)`);
+    // Wait past the interim "Checking…" for the real answer.
+    const msg = await until(async () => {
+      const t = await ui(`document.querySelector('[data-testid="ext-support"]')?.textContent`);
+      return t && !/Checking/.test(t) ? t : null;
+    }, 8000, "support message");
+    assert(/Wayland/.test(msg) && /Xorg/.test(msg), `message: ${msg}`);
+    assert(await ui(`document.querySelector('[data-testid="btn-start"]').disabled`), "Start is enabled on Wayland");
+    await until(async () => (await state()).status === "Ready", 5000, "the status to show Ready (the text is there)");
+    shot("desktop-wayland");
+    await ui(`(__tw.setText(""), 1)`);
+    await closeApp();
   });
 
   await closeApp();

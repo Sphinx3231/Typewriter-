@@ -67,7 +67,29 @@ pub struct Config {
 }
 
 const TICK: Duration = Duration::from_millis(10);
+
 const EMIT_EVERY: Duration = Duration::from_millis(40);
+
+/// Every distinct character the timeline types, in order of first appearance.
+pub fn session_chars(events: &[Event]) -> Vec<char> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut add = |t: &str| {
+        for c in t.chars() {
+            if seen.insert(c) {
+                out.push(c);
+            }
+        }
+    };
+    for e in events {
+        match e {
+            Event::Type { text, .. } => add(text),
+            Event::Replace { replacement, .. } => replacement.iter().for_each(|g| add(g)),
+            _ => {}
+        }
+    }
+    out
+}
 
 pub struct Session<D: Desktop> {
     cfg: Config,
@@ -117,6 +139,10 @@ impl<D: Desktop> Session<D> {
             self.update("completed", 0.0, None, None);
             return "completed".into();
         }
+        // Let the backend prepare for every character up front (on X11: bind the ones
+        // that aren't on the keyboard layout), well before the first key is due.
+        let chars = session_chars(&self.cfg.events);
+        self.desktop.prepare(&chars);
         match self.wait_and_count_down() {
             Flow::End => return "stopped".into(),
             Flow::Continue => {}

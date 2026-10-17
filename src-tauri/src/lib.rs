@@ -35,6 +35,16 @@ fn external_support(prompt: bool) -> Support {
     check_support(prompt)
 }
 
+/// What the windows receive: the native update plus whether the emergency-stop
+/// shortcut is really registered (so the status window never shows a dead hint).
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateEvent<'a> {
+    #[serde(flatten)]
+    update: &'a typewriter_native::Update,
+    shortcut_registered: bool,
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StartResult {
@@ -65,7 +75,7 @@ fn external_start(app: AppHandle, events: Vec<Event>, countdown_ms: u64, minimiz
     let handle = app.clone();
     let (control, _join) = spawn_session(cfg, move |update| {
         let done = matches!(update.phase.as_str(), "completed" | "stopped" | "failed");
-        let _ = handle.emit("external://update", &update);
+        let _ = handle.emit("external://update", UpdateEvent { update: &update, shortcut_registered });
         if done {
             let _ = handle.global_shortcut().unregister(stop_shortcut());
             handle.state::<AppState>().control.lock().unwrap().take();
@@ -126,7 +136,7 @@ fn show_hud(app: &AppHandle) {
     }
     let mut b = WebviewWindowBuilder::new(app, "hud", WebviewUrl::App("hud.html".into()))
         .title("Typewriter status")
-        .inner_size(360.0, 132.0)
+        .inner_size(380.0, 176.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
@@ -136,7 +146,7 @@ fn show_hud(app: &AppHandle) {
     if let Ok(Some(m)) = app.primary_monitor() {
         let scale = m.scale_factor();
         let w = m.size().width as f64 / scale;
-        b = b.position(w - 380.0, 24.0);
+        b = b.position(w - 400.0, 24.0);
     }
     let _ = b.build();
 }
@@ -170,9 +180,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the main window ends any typing session and the app.
+            // When the main window is really gone, end any typing session and the app.
+            // (Not on CloseRequested: the window may ask the user first and stay open.)
             if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let tauri::WindowEvent::Destroyed = event {
                     stop_session(window.app_handle());
                     if let Some(hud) = window.app_handle().get_webview_window("hud") {
                         let _ = hud.close();

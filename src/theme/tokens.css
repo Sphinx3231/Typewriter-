@@ -1,6 +1,6 @@
 /*
  * Typewriter design tokens. Every component reads colors from here.
- * Light: purple (brand), white (surfaces), cyan (progress, focus, highlights).
+ * Light: white (surfaces), purple (brand), blue (progress, focus, highlights).
  * Dark:  near-black (ground), charcoal (surfaces), red (brand), orange (progress, highlights).
  */
 :root {
@@ -37,7 +37,7 @@
 
   /* ---- light theme (default) ---- */
   --bg: #f6f6fb;
-  --bg-tint: radial-gradient(1200px 600px at 100% -10%, rgba(6, 182, 212, 0.07), transparent 60%),
+  --bg-tint: radial-gradient(1200px 600px at 100% -10%, rgba(37, 99, 235, 0.07), transparent 60%),
     radial-gradient(900px 500px at -10% 0%, rgba(124, 58, 237, 0.06), transparent 55%);
   --surface: #ffffff;
   --surface-2: #fbfaff;
@@ -46,7 +46,7 @@
   --paper-rule: rgba(124, 58, 237, 0.06);
   --text: #1e293b;
   --text-muted: #5b6577;
-  --text-subtle: #687286;
+  --text-subtle: #626b7f;
   --border: #e5e3f0;
   --border-strong: #d4d0e4;
 
@@ -59,30 +59,32 @@
   --on-primary: #ffffff;
   --primary-text: #6d28d9;
 
-  --accent: #06b6d4;
-  --accent-strong: #0e7490;
-  --accent-soft: #e4f8fb;
-  --accent-text: #0e7490;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #eaf0fe;
+  --accent-text: #1d4ed8;
 
   --danger: #dc2626;
   --danger-hover: #b91c1c;
   --danger-soft: #fdecec;
+  --danger-fill: #dc2626;
+  --danger-fill-hover: #b91c1c;
   --danger-text: #b91c1c;
-  --success: #15803d;
+  --success: #13763a;
   --success-soft: #e6f5ec;
-  --warning: #b45309;
+  --warning: #a84d07;
   --warning-soft: #fdf3e2;
 
-  --focus-ring: 0 0 0 3px rgba(6, 182, 212, 0.45);
-  --caret: #0891b2;
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.45);
+  --caret: #2563eb;
   --typo-bg: rgba(220, 38, 38, 0.12);
   --typo-text: #b91c1c;
   --typo-line: #dc2626;
-  --fix-bg: rgba(6, 182, 212, 0.2);
+  --fix-bg: rgba(37, 99, 235, 0.16);
   --selection: rgba(124, 58, 237, 0.18);
 
   --progress-track: #ece9f6;
-  --progress-fill: linear-gradient(90deg, #7c3aed 0%, #06b6d4 100%);
+  --progress-fill: linear-gradient(90deg, #7c3aed 0%, #2563eb 100%);
 
   --shadow-sm: 0 1px 2px rgba(30, 27, 60, 0.05);
   --shadow-md: 0 1px 2px rgba(30, 27, 60, 0.05), 0 8px 24px -12px rgba(60, 36, 140, 0.18);
@@ -113,7 +115,7 @@
   --border-strong: #35353e;
 
   --primary: #ef4444;
-  --primary-hover: #f05a5a;
+  --primary-hover: #c81e1e;
   --primary-active: #dc2626;
   --primary-fill: #dc2626;
   --primary-soft: rgba(239, 68, 68, 0.12);
@@ -129,6 +131,9 @@
   --danger: #ef4444;
   --danger-hover: #f87171;
   --danger-soft: rgba(239, 68, 68, 0.12);
+  /* filled buttons carry white text: keep these dark enough for 4.5:1 */
+  --danger-fill: #dc2626;
+  --danger-fill-hover: #b91c1c;
   --danger-text: #fca5a5;
   --success: #4ade80;
   --success-soft: rgba(74, 222, 128, 0.12);

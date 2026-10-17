@@ -417,11 +417,11 @@ kbd {
   color: var(--text);
 }
 .btn--danger {
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-fill);
+  color: var(--on-primary);
 }
 .btn--danger:hover:not(:disabled) {
-  background: var(--danger-hover);
+  background: var(--danger-fill-hover);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -1517,8 +1517,8 @@ fieldset:disabled .segmented__opt {
   animation: toast-in 180ms var(--ease);
 }
 .toast--error {
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-fill);
+  color: var(--on-primary);
 }
 @keyframes toast-in {
   from {
@@ -1872,4 +1872,44 @@ fieldset:disabled .segmented__opt {
 }
 .output-note {
   align-items: flex-start;
+}
+
+/* ---- quit confirmation (desktop) ---- */
+.quit-dialog {
+  max-width: min(520px, calc(100vw - 32px));
+  padding: var(--sp-6);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.quit-dialog::backdrop {
+  background: rgba(10, 10, 20, 0.45);
+}
+.quit-dialog h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+}
+.quit-dialog h2 svg {
+  color: var(--warning);
+}
+.quit-dialog p {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.quit-dialog__actions .btn:focus-visible,
+.quit-dialog__actions .btn:focus {
+  box-shadow: var(--focus-ring);
+}
+.quit-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
 }

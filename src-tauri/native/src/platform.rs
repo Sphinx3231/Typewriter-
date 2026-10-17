@@ -32,6 +32,9 @@ pub trait Desktop {
     fn failsafe_triggered(&mut self) -> bool;
     /// Send one key action to the focused window.
     fn send(&mut self, action: &KeyAction) -> Result<(), String>;
+    /// Called once with every character the session will type, before the
+    /// countdown, so the backend can set up whatever those characters need.
+    fn prepare(&mut self, _chars: &[char]) {}
 }
 
 /// Window titles that suggest a login or password manager. Typing is refused there.
@@ -54,7 +57,7 @@ use enigo::{Direction, Enigo, Key, Keyboard, Mouse, Settings};
 #[serde(rename_all = "camelCase")]
 pub struct Support {
     pub available: bool,
-    /// "ok", "permission-denied", "no-display" or "unsupported"
+    /// "ok", "permission-denied", "no-display", "wayland" or "unsupported"
     pub state: String,
     pub platform: String,
     pub message: String,
@@ -74,18 +77,51 @@ fn settings(prompt: bool) -> Settings {
     Settings { open_prompt_to_get_permissions: prompt, linux_delay: 4, ..Settings::default() }
 }
 
+/// Why a Linux desktop session can't take simulated typing, from its environment.
+///
+/// On Wayland the compositor doesn't let one app send keys to another, or tell it
+/// which window has focus. XWayland sets `DISPLAY` too, but keys sent there only
+/// reach older X11 apps, and focus can't be tracked across the two. So any Wayland
+/// session is refused with an explanation instead of half-working.
+pub fn linux_session_problem(display: Option<&str>, wayland_display: Option<&str>, session_type: Option<&str>) -> Option<(&'static str, String)> {
+    let wayland = wayland_display.is_some() || session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland"));
+    if wayland {
+        return Some((
+            "wayland",
+            "This is a Wayland session. Wayland doesn't let one app type into another, so Typewriter can't type into your document here. \
+             Log out and pick an \"Xorg\" or \"X11\" session at the login screen (for example \"Ubuntu on Xorg\"), then try again. \
+             The preview in Typewriter still works."
+                .into(),
+        ));
+    }
+    if display.is_none() {
+        return Some(("no-display", "Typing into other apps needs an X11 desktop session, and none was found (DISPLAY is not set).".into()));
+    }
+    None
+}
+
 /// Checks whether keyboard input can be simulated, without typing anything.
 /// On macOS, `prompt` opens the system dialog that asks for Accessibility access.
 pub fn check_support(prompt: bool) -> Support {
     let platform = platform_name().to_string();
-    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
-        return Support {
-            available: false,
-            state: "no-display".into(),
-            platform,
-            message: "Typing into other apps needs an X11 session (DISPLAY is not set). On Wayland, log in with an \"Xorg\"/\"X11\" session.".into(),
-        };
+    if cfg!(target_os = "linux") {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        if let Some((state, message)) = linux_session_problem(var("DISPLAY").as_deref(), var("WAYLAND_DISPLAY").as_deref(), var("XDG_SESSION_TYPE").as_deref()) {
+            return Support { available: false, state: state.into(), platform, message };
+        }
     }
+    // On X11, ask for exactly what the typer uses (a display with XTest). Creating an
+    // enigo instance here would fail whenever another session has every spare key
+    // code bound, and wrongly report typing as unavailable.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = prompt;
+        match crate::xtyper::probe() {
+            Ok(()) => Support { available: true, state: "ok".into(), platform, message: "Ready to type into other apps.".into() },
+            Err(e) => Support { available: false, state: "unsupported".into(), platform, message: format!("Keyboard input isn't available: {e}") },
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
     match Enigo::new(&settings(prompt)) {
         Ok(_) => Support { available: true, state: "ok".into(), platform, message: "Ready to type into other apps.".into() },
         Err(enigo::NewConError::NoPermission) => Support {
@@ -99,7 +135,8 @@ pub fn check_support(prompt: bool) -> Support {
 }
 
 pub struct RealDesktop {
-    enigo: Enigo,
+    /// Windows/macOS key output, and the Linux fallback if XTest can't be used.
+    enigo: Option<Enigo>,
     #[cfg(target_os = "linux")]
     x11: Option<linux::X11>,
     #[cfg(target_os = "linux")]
@@ -112,19 +149,23 @@ impl RealDesktop {
         if !support.available {
             return Err(support);
         }
-        let enigo = Enigo::new(&settings(false)).map_err(|e| Support {
-            available: false,
-            state: "unsupported".into(),
-            platform: platform_name().into(),
-            message: format!("Keyboard input isn't available: {e}."),
-        })?;
-        Ok(Self {
-            enigo,
-            #[cfg(target_os = "linux")]
-            x11: linux::X11::connect(),
-            #[cfg(target_os = "linux")]
-            typer: crate::xtyper::XTyper::connect().ok(),
-        })
+        let new_enigo = || {
+            Enigo::new(&settings(false)).map_err(|e| Support {
+                available: false,
+                state: "unsupported".into(),
+                platform: platform_name().into(),
+                message: format!("Keyboard input isn't available: {e}."),
+            })
+        };
+        #[cfg(target_os = "linux")]
+        {
+            // Waits for a previous session to finish restoring the keymap (see xtyper).
+            let typer = crate::xtyper::XTyper::connect().ok();
+            let enigo = if typer.is_some() { None } else { Some(new_enigo()?) };
+            Ok(Self { enigo, x11: linux::X11::connect(), typer })
+        }
+        #[cfg(not(target_os = "linux"))]
+        Ok(Self { enigo: Some(new_enigo()?) })
     }
 }
 
@@ -160,7 +201,16 @@ impl Desktop for RealDesktop {
         if let Some(p) = self.x11.as_ref().and_then(|x| x.pointer()) {
             return p.x <= 1 && p.y <= 1;
         }
-        matches!(self.enigo.location(), Ok((x, y)) if x <= 1 && y <= 1)
+        matches!(self.enigo.as_ref().map(|e| e.location()), Some(Ok((x, y))) if x <= 1 && y <= 1)
+    }
+
+    fn prepare(&mut self, chars: &[char]) {
+        #[cfg(target_os = "linux")]
+        if let Some(t) = self.typer.as_mut() {
+            t.prebind(chars);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = chars;
     }
 
     fn send(&mut self, action: &KeyAction) -> Result<(), String> {
@@ -168,13 +218,14 @@ impl Desktop for RealDesktop {
         if let Some(t) = self.typer.as_mut() {
             return t.send(action);
         }
+        let enigo = self.enigo.as_mut().ok_or("no keyboard output is available")?;
         let r = match action {
-            KeyAction::Text(t) => self.enigo.text(t),
-            KeyAction::Enter => self.enigo.key(Key::Return, Direction::Click),
-            KeyAction::Tab => self.enigo.key(Key::Tab, Direction::Click),
-            KeyAction::Backspace => self.enigo.key(Key::Backspace, Direction::Click),
-            KeyAction::Left => self.enigo.key(Key::LeftArrow, Direction::Click),
-            KeyAction::Right => self.enigo.key(Key::RightArrow, Direction::Click),
+            KeyAction::Text(t) => enigo.text(t),
+            KeyAction::Enter => enigo.key(Key::Return, Direction::Click),
+            KeyAction::Tab => enigo.key(Key::Tab, Direction::Click),
+            KeyAction::Backspace => enigo.key(Key::Backspace, Direction::Click),
+            KeyAction::Left => enigo.key(Key::LeftArrow, Direction::Click),
+            KeyAction::Right => enigo.key(Key::RightArrow, Direction::Click),
         };
         r.map_err(|e| e.to_string())
     }

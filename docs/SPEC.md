@@ -731,3 +731,15 @@ At the end, provide a concise report covering:
 - Any remaining defects or incomplete requirements.
 
 The final result should be a cohesive, production-quality Typewriter application: visually distinctive, fully functional, reliable, and capable of reproducing a natural typing process while preserving the user's supplied text exactly.
+
+---
+
+# AMENDMENTS
+
+## 2026-10-17 — Desktop-first, light palette
+
+These amendments come from the product owner and override the sections above where they conflict.
+
+- **Priority:** the standalone desktop app is the primary product. The Chrome extension is kept but deferred. Chrome Web Store publication is not pursued, and its fee is not authorized.
+- **Light theme palette:** white, blue and purple. Blue replaces cyan as the secondary color (progress, focus, highlights, caret). Purple stays the primary brand color. The dark theme is unchanged: black, red and orange.
+- **Contrast:** every text/background token pair is checked automatically against WCAG AA (`src/theme/contrast.test.ts`).

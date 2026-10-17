@@ -1,4 +1,6 @@
-# Typewriter for Chrome
+# Typewriter for Chrome (deferred)
+
+> **Status: deferred.** The desktop app is the primary product (see [`DESKTOP.md`](DESKTOP.md)). The extension stays in the repository, built and tested, for possible later use. It is **not published** to the Chrome Web Store, and publishing is not planned: the developer fee is not authorized.
 
 The Chrome extension is Typewriter in Chrome's side panel. Paste your text, choose the duration and realism, click into a web page such as a Google Docs document, and Typewriter types the text there with real key presses.
 
@@ -11,8 +13,8 @@ It is the same app as the browser and desktop versions, with the same engine and
 The extension isn't on the Chrome Web Store (see [Publishing](#publishing-and-updates)). Install it yourself:
 
 1. Get the extension:
-   - **Download:** from the repository's **Actions › CI** run, download the `typewriter-chrome-extension` artifact. Unzip it, then unzip `typewriter-extension-1.0.0.zip` inside it into a folder.
-   - **Or build it:** `npm ci && npm run extension:build`. The folder is `dist-extension/` and the ZIP is `release/typewriter-extension-1.0.0.zip`.
+   - **Download:** from the repository's **Actions › CI** run, download the `typewriter-chrome-extension` artifact. Unzip it, then unzip `typewriter-extension-<version>.zip` inside it into a folder.
+   - **Or build it:** `npm ci && npm run extension:build`. The folder is `dist-extension/` and the ZIP is `release/typewriter-extension-<version>.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and choose the folder with `manifest.json` in it.

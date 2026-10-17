@@ -23,6 +23,7 @@ struct State {
     fields: HashMap<String, VirtualField>,
     keys_sent: usize,
     first_key_at: Option<Instant>,
+    prepared: Option<(Vec<char>, usize)>,
 }
 
 #[derive(Clone, Default)]
@@ -52,6 +53,11 @@ impl Desktop for Fake {
     }
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
+    }
+    fn prepare(&mut self, chars: &[char]) {
+        let mut s = self.0.lock().unwrap();
+        let sent = s.keys_sent;
+        s.prepared = Some((chars.to_vec(), sent));
     }
     fn send(&mut self, a: &KeyAction) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
@@ -114,6 +120,22 @@ fn never_types_while_typewriter_has_focus() {
     r.control.send(Command::Stop);
     assert_eq!(r.handle.join().unwrap(), "stopped");
     assert_eq!(fake.keys(), 0);
+}
+
+#[test]
+fn the_backend_is_prepared_with_every_character_before_any_key() {
+    let fake = Fake::default();
+    fake.focus(win("doc", 42, "Doc"));
+    let events = vec![
+        Event::Type { at: 1.0, text: "a".into() },
+        Event::Type { at: 2.0, text: "👍🏽".into() },
+        Event::Replace { at: 3.0, start: 0, end: 1, replacement: vec!["“".into(), "a".into()] },
+    ];
+    let r = start(&fake, events, 30);
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let (chars, keys_before) = fake.0.lock().unwrap().prepared.clone().expect("prepare was called");
+    assert_eq!(keys_before, 0, "keys were sent before preparing");
+    assert_eq!(chars, vec!['a', '👍', '🏽', '“']);
 }
 
 #[test]

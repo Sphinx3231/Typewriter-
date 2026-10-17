@@ -10,6 +10,10 @@ rhythm, pauses, and temporary typos that get corrected.
 
 This repository is its own project. It does **not** inherit rules from any other repository.
 
+**Priority (2026-10-17):** the standalone desktop app is the primary product. The Chrome extension is
+kept but deferred. Do not publish to the Chrome Web Store or pay its developer fee. Do not merge,
+delete branches or rewrite history without the owner's approval.
+
 ---
 
 ## Rules

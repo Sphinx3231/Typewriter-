@@ -11,6 +11,7 @@ import { HistoryView } from "./ui/HistoryView";
 import { Logo } from "./ui/Logo";
 import { PlaybackSurface } from "./ui/PlaybackSurface";
 import { PreferencesView } from "./ui/PreferencesView";
+import { QuitGuard } from "./ui/QuitGuard";
 import { copyText, SessionBar } from "./ui/SessionBar";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { StatusPill } from "./ui/StatusPill";
@@ -141,7 +142,7 @@ export default function App() {
         </nav>
         <div className="sidebar__foot">
           <p className="sidebar__tag">Type naturally. Write effortlessly.</p>
-          <p className="sidebar__meta">Runs on your device · v1.0</p>
+          <p className="sidebar__meta">Runs on your device · v1.1</p>
         </div>
       </aside>
 
@@ -226,6 +227,7 @@ export default function App() {
           </button>
         ))}
       </nav>
+      {session.host === "desktop" ? <QuitGuard session={session} /> : null}
     </div>
   );
 }

@@ -11,6 +11,7 @@
 //!   removed again when the typer is dropped.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection;
@@ -28,8 +29,19 @@ const XK_LEFT: u32 = 0xff51;
 const XK_RIGHT: u32 = 0xff53;
 const XK_SHIFT_L: u32 = 0xffe1;
 const XK_CAPS_LOCK: u32 = 0xffe5;
+/// Spare key codes left alone for other programs that use the same technique.
+const LEAVE_FREE: usize = 2;
 /// A spare code is reused only after this long, so the target has seen the old binding's keys.
 const REBIND_AFTER: Duration = Duration::from_millis(250);
+/// After changing a binding, wait this long before pressing the key. Apps (Chromium,
+/// for one) reload their copy of the keymap asynchronously after the change notice,
+/// so a key pressed at once can still be read with the old symbol.
+const SETTLE_AFTER_REMAP: Duration = Duration::from_millis(80);
+
+/// Only one typer may change the keymap at a time. A new session must not even read
+/// the keymap while the previous one is still removing its bindings, or it would
+/// mistake those temporary bindings for real keys on the layout.
+static KEYMAP: Mutex<()> = Mutex::new(());
 
 pub struct XTyper {
     conn: RustConnection,
@@ -41,6 +53,8 @@ pub struct XTyper {
     spare: VecDeque<(u8, Option<Instant>)>,
     bound: HashMap<u32, u8>,
     last_used: HashMap<u8, Instant>,
+    // Declared last: released only after Drop has restored the keymap.
+    _keymap: MutexGuard<'static, ()>,
 }
 
 /// Keysym for a character: Latin-1 maps directly, everything else uses the Unicode keysym range.
@@ -53,8 +67,16 @@ pub fn keysym_for(c: char) -> u32 {
     }
 }
 
+/// Whether keys can be sent on this display: an X11 connection with XTest.
+pub fn probe() -> Result<(), String> {
+    let (conn, _) = x11rb::connect(None).map_err(|e| format!("can't connect to the X11 display ({e})."))?;
+    conn.xtest_get_version(2, 2).map_err(|e| e.to_string())?.reply().map_err(|_| "the X server has no XTest extension.".to_string())?;
+    Ok(())
+}
+
 impl XTyper {
     pub fn connect() -> Result<Self, String> {
+        let keymap = KEYMAP.lock().unwrap_or_else(|e| e.into_inner());
         let (conn, screen) = x11rb::connect(None).map_err(|e| e.to_string())?;
         conn.xtest_get_version(2, 2).map_err(|e| e.to_string())?.reply().map_err(|_| "The X server has no XTest extension.".to_string())?;
         let root = conn.setup().roots[screen].root;
@@ -74,10 +96,20 @@ impl XTyper {
                 shift_kc = kc;
             }
         }
-        if spare.is_empty() {
-            return Err("No free key codes to type characters that aren't on the keyboard layout.".into());
-        }
-        Ok(Self { conn, root, min_kc, per, syms, shift_kc, spare, bound: HashMap::new(), last_used: HashMap::new() })
+        // Leave a couple of codes for other tools; keep at least one for ourselves.
+        // With none at all, keys on the layout still work; others fail with a message.
+        let keep = spare.len().saturating_sub(LEAVE_FREE).max(spare.len().min(1));
+        spare.truncate(keep);
+        Ok(Self { conn, root, min_kc, per, syms, shift_kc, spare, bound: HashMap::new(), last_used: HashMap::new(), _keymap: keymap })
+    }
+
+    /// A full-width keymap row: `ks` on the first two levels, nothing elsewhere.
+    /// Always the server's own width: some clients mis-merge narrower updates.
+    fn row(&self, ks: u32) -> Vec<u32> {
+        let mut r = vec![0; self.per.max(2)];
+        r[0] = ks;
+        r[1] = ks;
+        r
     }
 
     /// (key code, needs shift) for a keysym already on the layout.
@@ -115,12 +147,42 @@ impl XTyper {
         Ok(())
     }
 
-    /// Binds `ks` to a spare key code (both levels), reusing the least recently used one.
+    /// Binds up front the characters a session will need that aren't on the layout,
+    /// as many as there are spare codes, so typing normally never remaps mid-session.
+    /// One change at a time, each given time to settle: apps that see a burst of
+    /// keymap changes can miss some of them.
+    pub fn prebind(&mut self, chars: &[char]) {
+        for &c in chars {
+            if self.bound.len() >= self.spare.len() {
+                break;
+            }
+            // Line breaks and tabs are sent as their own keys, never as symbols.
+            if c.is_control() {
+                continue;
+            }
+            let ks = keysym_for(c);
+            if self.lookup(ks).is_some() || self.bound.contains_key(&ks) {
+                continue;
+            }
+            if self.bind(ks).is_err() {
+                break;
+            }
+        }
+    }
+
+    /// Binds `ks` to a spare key code (both levels), reusing the least recently used
+    /// one, and waits for apps to pick up the change before the key is used.
     fn bind(&mut self, ks: u32) -> Result<u8, String> {
         if let Some(&kc) = self.bound.get(&ks) {
             return Ok(kc);
         }
-        let (kc, _) = self.spare.pop_front().ok_or("no spare key code")?;
+        let kc = self.remap(ks)?;
+        std::thread::sleep(SETTLE_AFTER_REMAP);
+        Ok(kc)
+    }
+
+    fn remap(&mut self, ks: u32) -> Result<u8, String> {
+        let (kc, _) = self.spare.pop_front().ok_or("there's no free key code for a character that isn't on the keyboard layout")?;
         if let Some(t) = self.last_used.get(&kc) {
             let idle = t.elapsed();
             if idle < REBIND_AFTER {
@@ -128,7 +190,7 @@ impl XTyper {
             }
         }
         self.bound.retain(|_, v| *v != kc);
-        self.conn.change_keyboard_mapping(1, kc, 2, &[ks, ks]).map_err(|e| e.to_string())?;
+        self.conn.change_keyboard_mapping(1, kc, self.per as u8, &self.row(ks)).map_err(|e| e.to_string())?;
         self.conn.sync().map_err(|e| e.to_string())?;
         self.bound.insert(ks, kc);
         self.spare.push_back((kc, None));
@@ -180,10 +242,12 @@ impl Drop for XTyper {
                 std::thread::sleep(REBIND_AFTER - idle);
             }
         }
+        // One at a time, like every other change (see SETTLE_AFTER_REMAP).
         for kc in codes {
-            let _ = self.conn.change_keyboard_mapping(1, kc, 2, &[0, 0]);
+            let _ = self.conn.change_keyboard_mapping(1, kc, self.per as u8, &self.row(0));
+            let _ = self.conn.sync();
+            std::thread::sleep(SETTLE_AFTER_REMAP);
         }
-        let _ = self.conn.sync();
     }
 }
 
