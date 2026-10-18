@@ -9,6 +9,11 @@ on:
   pull_request:
     paths: ["src-tauri/**", ".github/workflows/desktop.yml"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Also publish a GitHub pre-release with these installers (only if every build and the Windows end-to-end test pass)"
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -111,3 +116,40 @@ jobs:
           name: windows-e2e-screenshots
           path: e2e-shots
           if-no-files-found: warn
+
+  # Run workflow with "release" ticked: once the installers are built and the installed
+  # Windows app has passed its end-to-end test on this same commit, publish them as a
+  # pre-release ("v<version>" from package.json), so they can be downloaded from the
+  # Releases page without signing in. Re-running it replaces that release's files.
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    needs: [build, windows-e2e]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: typewriter-*
+          path: artifacts
+      - name: Collect the installers and their checksums
+        run: |
+          mkdir dist
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe' -o -name '*.dmg' \) -exec cp {} dist/ \;
+          ls dist/*-setup.exe dist/*.dmg dist/*.deb > /dev/null
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          echo "VERSION=$(node -p 'require("./package.json").version')" >> "$GITHUB_ENV"
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          notes="docs/RELEASE-$VERSION.md"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease --title "Typewriter $VERSION" --notes-file "$notes"
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --prerelease --target "$GITHUB_SHA" --title "Typewriter $VERSION" --notes-file "$notes"
+          fi
+          echo "Release: $(gh release view "$tag" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"
