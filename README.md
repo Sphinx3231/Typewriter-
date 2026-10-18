@@ -10,7 +10,7 @@ Everything runs on your computer: no account, no server, no AI, no tracking.
 
 ## Install the desktop app
 
-**Download:** the repository's **Releases** page (right-hand side on GitHub) › the newest **Typewriter** entry (marked *Pre-release*) › *Assets*. No GitHub sign-in needed.
+**Download:** the repository's **Releases** page (right-hand side on GitHub) › the newest **Typewriter** entry (marked *Pre-release*) › *Assets*. The repository is private: sign in to GitHub with an account that has access.
 
 | System | File | Status |
 |---|---|---|

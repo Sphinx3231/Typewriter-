@@ -37,6 +37,8 @@ struct State {
     /// Moves focus to this window during the next password-field check after 3 keys (the
     /// user clicks elsewhere while that check, which can be slow, is running).
     focus_moves_during_check: Option<WindowInfo>,
+    /// A focus switch the session sees on its next look at the focused window (`switch_focus`).
+    pending_focus: Option<WindowInfo>,
 }
 
 #[derive(Clone, Default)]
@@ -45,6 +47,18 @@ struct Fake(Arc<Mutex<State>>);
 impl Fake {
     fn focus(&self, w: WindowInfo) {
         self.0.lock().unwrap().focused = Some(w);
+    }
+    /// Moves focus mid-typing the way the system reports it: between two keys, at the session's
+    /// next look at the focused window. (`focus` can land between that look and the key it
+    /// allows, a gap of microseconds that no desktop app can close: on a slow CI runner one key
+    /// then reached the new window.) Returns once the session has seen the switch.
+    fn switch_focus(&self, w: WindowInfo) {
+        self.0.lock().unwrap().pending_focus = Some(w);
+        let t0 = Instant::now();
+        while self.0.lock().unwrap().pending_focus.is_some() && t0.elapsed() < Duration::from_secs(5) {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(self.0.lock().unwrap().pending_focus.is_none(), "the session never looked at the focused window");
     }
     fn text(&self, id: &str) -> String {
         self.0.lock().unwrap().fields.get(id).map(|f| f.text()).unwrap_or_default()
@@ -56,7 +70,10 @@ impl Fake {
 
 impl Desktop for Fake {
     fn focused_window(&mut self) -> Option<WindowInfo> {
-        let s = self.0.lock().unwrap();
+        let mut s = self.0.lock().unwrap();
+        if let Some(w) = s.pending_focus.take() {
+            s.focused = Some(w);
+        }
         if s.focus_unknown {
             None
         } else {
@@ -273,7 +290,7 @@ fn focus_change_pauses_and_resume_continues_exactly() {
     let text: String = "pause and resume should not lose or repeat anything. ".repeat(3);
     let r = start(&fake, events_for(&text, 4.0), 20);
     thread::sleep(Duration::from_millis(250));
-    fake.focus(win("chat", 77, "Chat app"));
+    fake.switch_focus(win("chat", 77, "Chat app"));
     assert!(wait_for_phase(&r, "paused", 500));
     let reason = r.updates.lock().unwrap().iter().rev().find(|u| u.phase == "paused").unwrap().reason.clone();
     assert_eq!(reason.as_deref(), Some("focus-changed"));
@@ -636,7 +653,7 @@ fn switching_browser_tabs_waits_and_continues_by_itself_in_the_original_tab() {
     let text = "typed into the document tab only, never into the other tab. ".repeat(2);
     let r = start(&fake, events_for(&text, 4.0), 20);
     thread::sleep(Duration::from_millis(200));
-    fake.focus(tab("YouTube"));
+    fake.switch_focus(tab("YouTube"));
     assert!(wait_for_phase(&r, "paused", 1000), "typing didn't wait when the tab changed");
     let u = last_paused(&r);
     assert_eq!(u.reason.as_deref(), Some("tab-changed"));
@@ -660,7 +677,7 @@ fn focus_moving_to_another_app_waits_and_continues_by_itself() {
     let text = "comes back by itself. ".repeat(4);
     let r = start(&fake, events_for(&text, 4.0), 20);
     thread::sleep(Duration::from_millis(150));
-    fake.focus(win("chat", 77, "Chat app"));
+    fake.switch_focus(win("chat", 77, "Chat app"));
     assert!(wait_for_phase(&r, "paused", 1000));
     assert_eq!(last_paused(&r).reason.as_deref(), Some("focus-changed"));
     thread::sleep(Duration::from_millis(200));
