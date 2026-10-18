@@ -1,11 +1,29 @@
 # Status
 
-_Last updated: 2026-10-17 (1.1.1 on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-18 (1.2.0 on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## 1.2.0: closing, tab switching, the countdown, packaging (2026-10-18, not merged)
+
+Three reports from real use on Windows: the app can't be closed (only Task Manager works), typing goes wrong when you switch tabs, and the status window is a blank small screen.
+
+| Report | Root cause | Fix | Evidence |
+|---|---|---|---|
+| **Closing is impossible** | Typewriter minimizes itself while typing. Closing it from the taskbar asked "Quit Typewriter?" *inside the minimized window*, so nothing visible happened. A blank or hung page never answered the close request at all. | A close request first restores and focuses the window. If the page hasn't answered within 3 s, the window closes anyway. The status window is destroyed with the main window. | Linux desktop E2E: "closing while minimized" and "a page that doesn't answer" (both fail on the old build). Windows runner (run 23): closing the installed app from the minimized state, and with a hung page; it exited 3.9 s after the close request. |
+| **Switching tabs** | A browser window has one handle for all its tabs. Switching tabs mid-session looked like the same window, so keys went into the other tab. | The active tab is told apart by the window title (unread counts and unsaved marks ignored). A tab or window switch makes typing **wait**, and it **continues by itself** when the original tab has focus again. Pause meanwhile makes it a normal pause; Resume in another tab continues there. | Native session tests (fail without the fix). Windows runner, real Chrome (run 23): Ctrl+Tab mid-session; it waited, nothing reached the other tab, and the original tab got the exact text. |
+| **First characters missing** (found while testing the tab fix) | On Start, Typewriter minimizes and Windows focuses the window behind it. The countdown started *then*, before your click, so typing could begin during the click. A status-window capture right after Start already said "Starting in 3". | A click (left or right) or a switch to another window during the countdown starts it again, so it always runs in full after your last click. | Native tests (fail without the fix). Run 22 lost "Ty" in Chrome; run 23, with the fix, typed it exactly. |
+| **Blank status window** | **Not reproduced.** Real screen captures of the status window on the Windows runner (run 23) show it fully painted in every phase: waiting, typing, paused, completed, including while the main window is minimized. The check fails if a capture has fewer than 12 colours or one colour covers 97% of it. | The likeliest explanation is an old build still installed (see packaging). Up to 1.1.1 there were two Windows installers. | Captures in the run 23 log. Not checked on your PC. |
+| **Packaging** | Every build was 1.1.1, and Windows got both an `.msi` (Program Files) and a `-setup.exe` (your user folder). Both could be installed side by side, and the Start menu could open the old copy. | Version **1.2.0**. Windows ships only the `-setup.exe`. **Settings › About** shows "Running from <path>" and warns when another installed copy exists; the diagnostics header records both. | Unit tests; the Windows E2E checks the path and that no second copy is reported. |
+
+**Coverage (2026-10-18):**
+- Frontend (Vitest, enforced in CI at 95%): **100% lines, 99.74% statements, 98.94% branches, 99.8% functions**, 695 tests.
+- Rust (`scripts/native-coverage.sh`: native tests plus the instrumented app driven by the Linux desktop E2E): **68.7% lines**. That is below 95%. The rest is in the Linux X11 key sender (`xtyper.rs`), the real-desktop adapter (`platform.rs`) and the native crate's entry points. These only run against a live X server and are exercised by the E2E, but most of their error branches aren't. Windows- and macOS-only code isn't compiled on Linux, so it isn't counted.
+
+**Not verified:** your PC, real Google Docs (no Google login on the runner), macOS (built and session-tested in CI, never launched).
 
 ## Windows desktop: "countdown, then nothing appears in Google Docs in Opera" (investigation, 2026-10-17)
 
