@@ -45,8 +45,10 @@ struct State {
 struct Fake(Arc<Mutex<State>>);
 
 impl Fake {
+    /// Moves focus. The session sees it at its next look at the focused window, i.e. between
+    /// two keys, as the system reports a switch (see `switch_focus`).
     fn focus(&self, w: WindowInfo) {
-        self.0.lock().unwrap().focused = Some(w);
+        self.0.lock().unwrap().pending_focus = Some(w);
     }
     /// Moves focus mid-typing the way the system reports it: between two keys, at the session's
     /// next look at the focused window. (`focus` can land between that look and the key it
