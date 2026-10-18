@@ -14,6 +14,10 @@
 #   input.ps1 sysclose TITLE   asks that window to close, like the taskbar's "Close window"
 #   input.ps1 hideconsoles     minimizes visible console windows (on the CI runner a stray
 #                              msedgewebview2.exe console can sit on top of the target windows)
+#   input.ps1 windows          lists visible top-level windows, top first: title, process, pid,
+#                              process start time, parent process (who opened a stray dialog?)
+#   input.ps1 closeforeign RE  closes visible windows whose title matches RE (a dialog the runner
+#                              opened on its own and that covers the targets) and lists them
 param([Parameter(Mandatory = $true)][string]$Cmd, [string]$A, [string]$B)
 Add-Type @"
 using System;
@@ -35,6 +39,21 @@ public static class TwInput {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+  // Visible top-level windows with a title, in z-order (top first).
+  public static System.Collections.Generic.List<IntPtr> Visible() {
+    var list = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, l) => {
+      if (IsWindowVisible(h) && !IsIconic(h)) {
+        var s = new StringBuilder(512);
+        if (GetWindowText(h, s, 512) > 0) list.Add(h);
+      }
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 }
@@ -47,6 +66,16 @@ function Find-Window([string]$title) {
     if ($p) { $h = $p.MainWindowHandle }
   }
   return $h
+}
+function Describe-Window([IntPtr]$h) {
+  $s = New-Object System.Text.StringBuilder 512
+  [TwInput]::GetWindowText($h, $s, 512) | Out-Null
+  $procId = [uint32]0
+  [TwInput]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
+  $p = Get-CimInstance Win32_Process -Filter "ProcessId = $procId" -ErrorAction SilentlyContinue
+  $parent = if ($p) { Get-CimInstance Win32_Process -Filter "ProcessId = $($p.ParentProcessId)" -ErrorAction SilentlyContinue }
+  $started = if ($p -and $p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString("HH:mm:ss") + " UTC" } else { "?" }
+  "`"$($s.ToString())`" · $(if ($p) { $p.Name } else { '?' }) (pid $procId, started $started, parent $(if ($parent) { "$($parent.Name) pid $($parent.ProcessId)" } else { '?' }))"
 }
 switch ($Cmd) {
   "click" {
@@ -169,5 +198,18 @@ switch ($Cmd) {
     $h = Find-Window $A
     if ($h -eq [IntPtr]::Zero) { exit 2 }
     [TwInput]::PostMessage($h, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
+  }
+  "windows" {
+    foreach ($h in [TwInput]::Visible()) { Describe-Window $h }
+  }
+  "closeforeign" {
+    foreach ($h in [TwInput]::Visible()) {
+      $s = New-Object System.Text.StringBuilder 512
+      [TwInput]::GetWindowText($h, $s, 512) | Out-Null
+      if ($s.ToString() -match $A) {
+        "closed a window the test didn't open: $(Describe-Window $h)"
+        [TwInput]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+      }
+    }
   }
 }

@@ -69,6 +69,7 @@ async function check(name, fn) {
   if (process.env.ONLY && !new RegExp(process.env.ONLY).test(name)) return;
   const t0 = Date.now();
   try {
+    closeForeignDialogs();
     await fn();
     console.log(`  ✓ ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (e) {
@@ -77,6 +78,20 @@ async function check(name, fn) {
     await diagnose();
     shot(`win-failed-${failures}`);
   }
+}
+
+/**
+ * Run 24: a "System Properties" / "Performance Options" dialog that no step of this test opens
+ * appeared on the runner and covered the target windows, so clicks landed on it. Close such a
+ * dialog before each check and say so (with the process that owns it, its parent and when it
+ * started). If Typewriter itself opened it, that is a real bug: fail.
+ */
+const FOREIGN = "^(System Properties|Performance Options|Change Computer Performance Settings)$";
+function closeForeignDialogs() {
+  const closed = ps("input.ps1", "closeforeign", FOREIGN);
+  if (!closed) return;
+  console.log(`    ${closed.split(/\r?\n/).join("\n    ")}`);
+  assert(!/parent typewriter/i.test(closed), `Typewriter opened a system dialog: ${closed}`);
 }
 
 /** What the app, the status window and Windows report after a failure, so a CI log alone explains it. */
@@ -94,6 +109,7 @@ async function diagnose() {
     await add("status window", () => hud());
   }
   await add("foreground window", () => ps("input.ps1", "fg"));
+  await add("visible windows, top first", () => ps("input.ps1", "windows").split(/\r?\n/));
   for (const key of Object.keys(targets)) await add(`${key} text`, () => read(key));
   console.log(`    diagnostics:\n      ${lines.join("\n      ")}`);
 }
@@ -628,6 +644,11 @@ async function newAppSession() {
 async function main() {
   assert(existsSync(APP), `App not found: ${APP}`);
   console.log(`Typewriter Windows E2E\n  app: ${APP}`);
+  try {
+    console.log(`  visible windows before the test:\n    ${ps("input.ps1", "windows").split(/\r?\n/).join("\n    ") || "(none)"}`);
+  } catch (e) {
+    console.log(`  visible windows before the test: (unavailable: ${String(e?.message ?? e).split("\n")[0]})`);
+  }
   procs.push(spawn("tauri-driver", ["--port", "4444"], { stdio: "ignore" }));
   await until(() => fetch(`${WD}/status`).then((r) => r.ok), 20000, "tauri-driver");
   await openTarget("doc", "Target Notes", 40, 260);
