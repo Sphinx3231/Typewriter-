@@ -342,7 +342,11 @@ fn emergency_stop_and_failsafe_stop_immediately() {
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));
     let r = start(&fake, events_for(&"x".repeat(500), 2.0), 10);
-    thread::sleep(Duration::from_millis(100));
+    // Stop mid-session: once typing has really begun (a slow CI runner may need more than 100 ms).
+    let t0 = Instant::now();
+    while fake.keys() == 0 && t0.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(5));
+    }
     r.control.send(Command::Stop);
     assert_eq!(r.handle.join().unwrap(), "stopped");
     let k = fake.keys();
@@ -354,7 +358,10 @@ fn emergency_stop_and_failsafe_stop_immediately() {
     let fake = Fake::default();
     fake.focus(win("doc", 42, "Doc"));
     let r = start(&fake, events_for(&"y".repeat(500), 2.0), 10);
-    thread::sleep(Duration::from_millis(100));
+    let t0 = Instant::now();
+    while fake.keys() == 0 && t0.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(5));
+    }
     fake.0.lock().unwrap().failsafe = true;
     let updates = r.updates.clone();
     assert_eq!(r.handle.join().unwrap(), "stopped");

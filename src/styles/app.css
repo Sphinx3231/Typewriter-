@@ -1463,6 +1463,25 @@ fieldset:disabled .segmented__opt {
 }
 
 /* ============ preferences ============ */
+.prefs__path {
+  overflow-wrap: anywhere;
+}
+.prefs__warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.prefs__warn svg {
+  flex: none;
+  margin-top: 2px;
+}
 .prefs__actions {
   display: flex;
   gap: var(--sp-2);

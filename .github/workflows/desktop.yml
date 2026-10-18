@@ -20,6 +20,10 @@ jobs:
             name: linux
           - os: windows-latest
             name: windows
+            # One installer only: the per-user setup.exe. Shipping an MSI as well (it installs
+            # to Program Files) let two copies sit side by side, and the Start menu could open
+            # the older one.
+            bundles: --bundles nsis
           - os: macos-latest
             name: macos
     runs-on: ${{ matrix.os }}
@@ -43,7 +47,7 @@ jobs:
       - name: Native typing tests
         run: cargo test --manifest-path src-tauri/native/Cargo.toml --test session
       - name: Build installers
-        run: npx tauri build
+        run: npx tauri build ${{ matrix.bundles }}
       - uses: actions/upload-artifact@v4
         with:
           name: typewriter-${{ matrix.name }}
@@ -51,7 +55,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.rpm
             src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*-setup.exe
             src-tauri/target/release/bundle/**/*.dmg
           if-no-files-found: warn

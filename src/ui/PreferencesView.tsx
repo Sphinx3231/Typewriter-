@@ -1,5 +1,5 @@
-import { ClipboardCopy, Monitor, Moon, RotateCcw, Sun, Trash2, Volume2 } from "lucide-react";
-import { useId } from "react";
+import { AlertTriangle, ClipboardCopy, Monitor, Moon, RotateCcw, Sun, Trash2, Volume2 } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import { TypingSound } from "../audio/sound";
 import type { Session } from "../state/useSession";
 import type { ThemePreference } from "../theme/theme";
@@ -18,6 +18,28 @@ const SHORTCUTS: [string, string][] = [
 
 let previewSound: TypingSound | null = null;
 
+/** Desktop: where this copy runs from, and other installed copies (the Start menu may open an older one). */
+interface InstallInfo {
+  exe: string;
+  others: string[];
+}
+
+function useInstallInfo(): InstallInfo | null {
+  const [info, setInfo] = useState<InstallInfo | null>(null);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let live = true;
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<InstallInfo>("install_info"))
+      .then((i) => live && setInfo(i))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  return info;
+}
+
 export function PreferencesView({
   session,
   themePreference,
@@ -29,6 +51,7 @@ export function PreferencesView({
 }) {
   const toast = useToast();
   const volId = useId();
+  const install = useInstallInfo();
   const { prefs, updatePrefs, settings, updateSettings } = session;
 
   const testSound = () => {
@@ -164,6 +187,17 @@ export function PreferencesView({
           <p className="panel__sub" data-testid="build-id">
             Build {APP_COMMIT}
           </p>
+          {install ? (
+            <p className="panel__sub prefs__path" data-testid="install-path">
+              Running from {install.exe}
+            </p>
+          ) : null}
+          {install && install.others.length > 0 ? (
+            <p className="prefs__warn" role="alert" data-testid="install-others">
+              <AlertTriangle size={15} aria-hidden="true" /> Another copy of Typewriter is installed at {install.others.join(", ")}. The Start menu or a shortcut may
+              open that older copy. Uninstall it under Settings › Apps (keep this one).
+            </p>
+          ) : null}
           {isDesktop() ? (
             <div className="prefs__actions">
               <Button

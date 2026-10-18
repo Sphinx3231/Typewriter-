@@ -648,6 +648,14 @@ async function main() {
     shot("win-00-about");
     const want = (process.env.EXPECT_COMMIT ?? "").slice(0, 7);
     if (want) assert(about[1] === `Build ${want}`, `the app shows "${about[1]}", expected "Build ${want}": this isn't the build under test`);
+    const install = await until(
+      () => js(`const p = document.querySelector('[data-testid="install-path"]'); const o = document.querySelector('[data-testid="install-others"]'); return p && [p.textContent.trim(), o ? o.textContent.trim() : ""]`),
+      8000,
+      "the install path in Settings › About",
+    );
+    console.log(`    ${install[0]}${install[1] ? ` · ${install[1]}` : ""}`);
+    assert(/typewriter\.exe$/i.test(install[0]), `Settings doesn't say where the app runs from: ${JSON.stringify(install[0])}`);
+    assert(!install[1], `a second installed copy was reported on a clean runner: ${install[1]}`);
     await ui(`(document.querySelector('[data-testid="nav-workspace"]').click(), 1)`);
   });
 

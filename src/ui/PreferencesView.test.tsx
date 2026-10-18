@@ -168,8 +168,43 @@ describe("PreferencesView", () => {
       (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     });
 
+    it("says where it runs from, and warns about another installed copy", async () => {
+      invoke.mockImplementation(async (cmd: string) =>
+        cmd === "install_info" ? { exe: "C:\\Users\\me\\AppData\\Local\\Typewriter\\typewriter.exe", others: ["C:\\Program Files\\Typewriter\\typewriter.exe"] } : undefined,
+      );
+      renderPrefs();
+      expect((await screen.findByTestId("install-path")).textContent).toBe("Running from C:\\Users\\me\\AppData\\Local\\Typewriter\\typewriter.exe");
+      const warn = screen.getByRole("alert");
+      expect(warn.textContent).toContain("Another copy of Typewriter is installed at C:\\Program Files\\Typewriter\\typewriter.exe");
+      expect(warn.textContent).toContain("Uninstall it under Settings › Apps");
+    });
+
+    it("shows no warning when this is the only copy, and nothing when the path can't be read", async () => {
+      invoke.mockImplementation(async (cmd: string) => (cmd === "install_info" ? { exe: "/usr/bin/typewriter", others: [] } : undefined));
+      const { unmount } = renderPrefs();
+      expect((await screen.findByTestId("install-path")).textContent).toBe("Running from /usr/bin/typewriter");
+      expect(screen.queryByTestId("install-others")).toBeNull();
+      unmount();
+      invoke.mockImplementation(async () => {
+        throw new Error("no such command");
+      });
+      renderPrefs();
+      await act(async () => {});
+      expect(screen.queryByTestId("install-path")).toBeNull();
+    });
+
+    it("doesn't update after it's gone when the answer comes late", async () => {
+      let answer: (v: unknown) => void = () => {};
+      invoke.mockImplementation((cmd: string) => (cmd === "install_info" ? new Promise((r) => (answer = r)) : Promise.resolve()));
+      const { unmount } = renderPrefs();
+      await act(async () => {});
+      unmount();
+      await act(async () => answer({ exe: "x", others: [] }));
+      expect(screen.queryByTestId("install-path")).toBeNull();
+    });
+
     it("copies typing diagnostics through the native command", async () => {
-      invoke.mockResolvedValueOnce(undefined);
+      invoke.mockImplementation(async () => undefined);
       renderPrefs();
       await userEvent.click(screen.getByTestId("copy-diagnostics"));
       expect(invoke).toHaveBeenCalledWith("copy_diagnostics");
@@ -177,7 +212,9 @@ describe("PreferencesView", () => {
     });
 
     it("reports a failure to copy diagnostics", async () => {
-      invoke.mockRejectedValueOnce(new Error("clipboard busy"));
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "copy_diagnostics") throw new Error("clipboard busy");
+      });
       renderPrefs();
       await userEvent.click(screen.getByRole("button", { name: "Copy typing diagnostics" }));
       expect(toasts()).toEqual([["Couldn't copy the diagnostics: Error: clipboard busy", "toast toast--error"]]);

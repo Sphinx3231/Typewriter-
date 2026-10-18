@@ -13,7 +13,7 @@ It's built with [Tauri 2](https://tauri.app) (MIT/Apache-2.0). The window runs t
 | Linux (Debian/Ubuntu) | `Typewriter_1.1.0_amd64.deb` | locally and in CI | **yes**: installed with apt (upgrade from 1.0.0); the full end-to-end suite passed against `/usr/bin/typewriter` |
 | Linux (any) | `Typewriter_1.1.0_amd64.AppImage` | locally and in CI | **yes**: launched; startup, exact typing, emergency stop and back-to-back session checks passed |
 | Linux (Fedora/openSUSE) | `Typewriter-1.1.0-1.x86_64.rpm` | locally and in CI | partly: package digests and files verified, installed into a scratch root, and its binary passed launch/typing/stop checks on Debian. **Not installed on Fedora/openSUSE** |
-| Windows 10/11 (x64) | `Typewriter_1.1.1_x64-setup.exe`, `Typewriter_1.1.1_x64_en-US.msi` | GitHub Actions (`Desktop builds`) | the `-setup.exe` is installed silently and the **installed** app passes the Windows end-to-end checks on a GitHub-hosted Windows Server 2022 runner (see Tests). The `.msi` is built but not installed. Not run on a personal Windows PC |
+| Windows 10/11 (x64) | `Typewriter_1.2.0_x64-setup.exe` (the only Windows installer since 1.2.0; there is no `.msi` any more) | GitHub Actions (`Desktop builds`) | installed silently, and the **installed** app passes the Windows end-to-end checks on a GitHub-hosted Windows Server 2022 runner (see Tests). Not run on a personal Windows PC |
 | macOS 11+ (Apple Silicon) | `Typewriter_1.1.0_aarch64.dmg` | GitHub Actions (`Desktop builds`) | built, and session tests pass in CI; **never launched**. There's no Intel (x86-64) build: the CI runner is Apple Silicon. |
 
 ### Get the installer
@@ -28,7 +28,8 @@ It's built with [Tauri 2](https://tauri.app) (MIT/Apache-2.0). The window runs t
 - **Debian/Ubuntu:** `sudo apt install ./Typewriter_1.1.0_amd64.deb`. Then open **Typewriter** from the app menu, or run `typewriter`. Installing over an older version upgrades it.
 - **AppImage:** `chmod +x Typewriter_1.1.0_amd64.AppImage && ./Typewriter_1.1.0_amd64.AppImage`. If your system has no FUSE, add `APPIMAGE_EXTRACT_AND_RUN=1` before the command.
 - **Fedora/openSUSE:** `sudo dnf install ./Typewriter-1.1.0-1.x86_64.rpm` (or `zypper install`).
-- **Windows:** run the `-setup.exe`. The installers are **unsigned** (code signing costs money), so SmartScreen will warn. Choose **More info › Run anyway**.
+- **Windows:** first uninstall **every** older Typewriter under **Settings › Apps** (up to 1.1.1 there were two installers, so there may be two entries: one from the `.msi` in `Program Files`, one from the `-setup.exe` in your user folder). Then run the `-setup.exe`. It is **unsigned** (code signing costs money), so SmartScreen will warn. Choose **More info › Run anyway**. If Typewriter is still running, the installer offers to close it.
+  Check **Settings › About**: it shows the version, the build code, and **Running from** the folder this copy was started from. If another installed copy is found, a warning names its folder; uninstall that one, or the Start menu may keep opening it.
 - **macOS:** open the `.dmg` and drag Typewriter to Applications. It's **unsigned**, so the first time, right-click the app › **Open** › **Open**.
 
 ### Build it yourself

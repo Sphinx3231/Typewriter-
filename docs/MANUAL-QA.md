@@ -13,29 +13,31 @@ Use a **private test document** with nothing important in it.
 1. Open the repository's **Actions** tab › **Desktop builds** › the latest run for branch
    `ccr-e747ce8b-l498oo` (you need to be signed in to GitHub to download).
 2. Download `typewriter-windows`, `typewriter-macos` or `typewriter-linux`, and unzip it.
-   - Windows: run the `*-setup.exe` (or the `.msi`). It's unsigned, so SmartScreen warns:
+   - Windows: run the `*-setup.exe` (since 1.2.0 it is the only Windows installer). It's unsigned, so SmartScreen warns:
      **More info › Run anyway**.
    - macOS (Apple Silicon): open the `.dmg`, drag Typewriter to Applications, then
      right-click › **Open** the first time (unsigned).
    - Linux: install the `.deb`, or run the `.AppImage`.
 3. **Remove the old version first.** Quit Typewriter (also from the tray icon), then uninstall it
    (Windows: Settings › Apps › Typewriter › Uninstall; macOS: drag it from Applications to the Trash).
-   Then install the new one.
+   On Windows, search the list for "Typewriter" and uninstall **every** entry: older builds came
+   with two installers, so there can be two copies. Then install the new one.
 4. **Check you are running the fixed build:** open Typewriter › **Settings** › scroll to the bottom.
-   It must say **Typewriter 1.1.1** and **Build** followed by a 7-character code. If it says
-   "Typewriter 1.0" or anything else, the old app is still the one running: don't test, send a
-   screenshot of that section instead.
+   It must say **Typewriter 1.2.0** and **Build** followed by a 7-character code, and on Windows
+   **Running from** `…\AppData\Local\Typewriter\typewriter.exe`, with **no** "Another copy of
+   Typewriter is installed" warning. If it says an older version, or shows that warning, the old
+   app is still around: uninstall the copy it names, then check again before testing.
 
 **Chrome extension** (unpacked, nothing is published):
 1. Get it: **Actions** › **CI** › the latest run for branch `ccr-e747ce8b-l498oo` › download
-   `typewriter-chrome-extension`, and unzip `typewriter-extension-1.1.1.zip` into a new folder.
+   `typewriter-chrome-extension`, and unzip `typewriter-extension-1.2.0.zip` into a new folder.
    (Or build it yourself: `npm ci && npm run extension:build`; the folder is `dist-extension/`.)
 2. `chrome://extensions` › turn on **Developer mode** › if an older Typewriter is listed,
    **Remove** it › **Load unpacked** › choose that folder.
 3. Chrome shows that Typewriter can use the debugger. That's expected: it's how it sends
    real key presses.
-4. **Check the version:** the Typewriter card in `chrome://extensions` must say **1.1.1**, and
-   the panel's **Settings** tab must say **Typewriter 1.1.1** and a **Build** code.
+4. **Check the version:** the Typewriter card in `chrome://extensions` must say **1.2.0**, and
+   the panel's **Settings** tab must say **Typewriter 1.2.0** and a **Build** code.
 
 Send back: your operating system and version, Chrome's version (`chrome://version`), and the
 **Build** code from Settings (desktop app and extension).
@@ -68,7 +70,7 @@ Send back: the screenshots, and whether the status window was ever blank.
 
 ## 1a. Windows: the same short text into three targets, with diagnostics
 
-This is the check for "the countdown runs, then nothing appears". Use the 1.1.1 build from step 0 and confirm its **Build** code first.
+This is the check for "the countdown runs, then nothing appears". Use the 1.2.0 build from step 0 and confirm its **Build** code first.
 
 1. Open Typewriter › **Settings** › **About**. Note the version and Build code.
 2. Paste exactly: `Hello from Typewriter 123.`

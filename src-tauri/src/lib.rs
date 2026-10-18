@@ -62,7 +62,12 @@ fn diag_sink(app: &AppHandle, id: u64) -> DiagSink {
         }
     }
     let version = app.package_info().version.to_string();
-    diag_append(&path, &format!("\n=== {} UTC · session {id} · Typewriter {version} build {} · {} {}", utc_now(), env!("TYPEWRITER_COMMIT"), std::env::consts::OS, std::env::consts::ARCH));
+    let info = install_info();
+    let others = if info.others.is_empty() { String::new() } else { format!(" · other installed copies: {}", info.others.join(", ")) };
+    diag_append(
+        &path,
+        &format!("\n=== {} UTC · session {id} · Typewriter {version} build {} · {} {} · running from {}{others}", utc_now(), env!("TYPEWRITER_COMMIT"), std::env::consts::OS, std::env::consts::ARCH, info.exe),
+    );
     Box::new(move |line: &str| diag_append(&path, line))
 }
 
@@ -74,6 +79,48 @@ fn diagnostics(app: AppHandle) -> (String, String) {
     let cut = text.len().saturating_sub(64 * 1024);
     let start = text[cut..].find('\n').map(|i| cut + i + 1).filter(|_| cut > 0).unwrap_or(cut);
     (path.map(|p| p.display().to_string()).unwrap_or_default(), text[start..].to_string())
+}
+
+/// Where this copy of Typewriter runs from, and other installed copies of it. Two copies
+/// (for example one from the old .msi in Program Files and one from the setup.exe in the
+/// user's AppData) mean the Start menu may open the older one.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallInfo {
+    exe: String,
+    others: Vec<String>,
+}
+
+fn other_installs(exe: &std::path::Path, candidates: &[std::path::PathBuf]) -> Vec<String> {
+    let me = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    let same = |p: &std::path::Path| std::fs::canonicalize(p).map(|c| c.to_string_lossy().to_lowercase() == me.to_string_lossy().to_lowercase()).unwrap_or(false);
+    let mut out: Vec<String> = candidates.iter().filter(|p| p.is_file() && !same(p)).map(|p| p.display().to_string()).collect();
+    out.dedup();
+    out
+}
+
+/// Where the installers put Typewriter on this system.
+fn install_candidates() -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut v = Vec::new();
+        for (var, sub) in [("LOCALAPPDATA", "Typewriter"), ("LOCALAPPDATA", "Programs\\Typewriter"), ("ProgramFiles", "Typewriter"), ("ProgramFiles(x86)", "Typewriter")] {
+            if let Ok(base) = std::env::var(var) {
+                v.push(std::path::Path::new(&base).join(sub).join("typewriter.exe"));
+            }
+        }
+        v
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
+#[tauri::command]
+fn install_info() -> InstallInfo {
+    let exe = std::env::current_exe().unwrap_or_default();
+    InstallInfo { others: other_installs(&exe, &install_candidates()), exe: exe.display().to_string() }
 }
 
 /// Copies the latest diagnostics to the clipboard so the user can paste them into a report.
@@ -368,7 +415,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main, close_answered, diagnostics, copy_diagnostics])
+        .invoke_handler(tauri::generate_handler![external_support, external_start, external_state, external_control, read_clipboard, show_main, close_answered, install_info, diagnostics, copy_diagnostics])
         .setup(|app| {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.
@@ -418,4 +465,29 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn other_installs_lists_existing_copies_but_not_this_one() {
+        let dir = std::env::temp_dir().join(format!("tw-installs-{}", std::process::id()));
+        let (a, b, missing) = (dir.join("a/typewriter.exe"), dir.join("b/typewriter.exe"), dir.join("c/typewriter.exe"));
+        for p in [&a, &b] {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"x").unwrap();
+        }
+        let found = other_installs(&a, &[a.clone(), b.clone(), missing]);
+        assert_eq!(found, vec![b.display().to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn utc_dates_are_civil_dates() {
+        let now = utc_now();
+        assert_eq!(now.len(), 19, "{now}");
+        assert!(now.starts_with("20"), "{now}");
+    }
 }
