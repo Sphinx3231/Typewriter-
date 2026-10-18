@@ -108,6 +108,11 @@ const TICK: Duration = Duration::from_millis(10);
 
 /// How often a session waiting for its window checks whether the window is back.
 const RECHECK: Duration = Duration::from_millis(150);
+/// A window that gets focus this soon after waiting begins, without a click, was focused by the
+/// system: Typewriter minimizes itself on Start and the window behind it takes focus. That
+/// doesn't start the countdown; the user's click (or a switch to another window) does.
+const HANDOFF: Duration = Duration::from_millis(1500);
+const CLICK_TO_START: &str = "Click into your document where the text should go. The countdown starts from your click.";
 
 /// The second half of every automatic pause message.
 const BACK: &str = "Click back into your document and it continues by itself.";
@@ -294,6 +299,12 @@ impl<D: Desktop> Session<D> {
         // before the user has clicked into the document; the click must count, not that.
         let mut counting_for: Option<(u64, String)> = None;
         let mut was_down = self.desktop.mouse_down();
+        // Counted from the session's start: a click while the keyboard was being prepared (or
+        // while the previous session cleaned up) is the user choosing the window.
+        let mut seen_clicks = 0;
+        // Only where clicks can be seen; elsewhere any window that gets focus starts the countdown.
+        let mut handoff_possible = self.desktop.sees_clicks();
+        let mut handoff: Option<Option<(u64, String)>> = None;
         loop {
             match self.control.take() {
                 Some(Command::Stop) => {
@@ -333,11 +344,32 @@ impl<D: Desktop> Session<D> {
             } else if unknown_since.is_none() {
                 unknown_since = Some(Instant::now());
             }
+            let own = focused.as_ref().map(|w| self.is_own(w)).unwrap_or(false);
             let away = focused.map(|w| !self.is_own(&w)).unwrap_or(false);
             let down = self.desktop.mouse_down();
-            let clicked = down && !was_down;
+            let clicks = self.desktop.clicks();
+            let clicked = (down && !was_down) || clicks != seen_clicks;
             was_down = down;
+            seen_clicks = clicks;
+            if handoff_possible && (clicked || waiting_since.elapsed() >= HANDOFF) {
+                handoff_possible = false;
+            } else if handoff_possible && away {
+                handoff_possible = false;
+                handoff = Some(seen.clone());
+                self.log("that window got focus by itself (Typewriter minimized): the countdown starts after a click");
+                self.update("waiting", self.cfg.countdown_ms as f64, Some("click-to-start"), Some(CLICK_TO_START.into()));
+                last_emit = Instant::now();
+            }
+            if handoff.is_some() && (own || (away && (clicked || handoff.as_ref() != Some(&seen)))) {
+                handoff = None;
+            }
             match (away, countdown_started) {
+                (true, None) if handoff.is_some() => {
+                    if last_emit.elapsed() >= Duration::from_millis(250) {
+                        self.update("waiting", self.cfg.countdown_ms as f64, Some("click-to-start"), Some(CLICK_TO_START.into()));
+                        last_emit = Instant::now();
+                    }
+                }
                 (false, _) => {
                     let restarted = countdown_started.take().is_some();
                     if restarted {

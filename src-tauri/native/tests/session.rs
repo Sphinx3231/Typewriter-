@@ -23,6 +23,8 @@ struct State {
     held: Vec<&'static str>,
     /// A mouse button is held down.
     mouse: bool,
+    /// The platform reports mouse buttons (sees_clicks).
+    clicks: bool,
     failsafe: bool,
     fields: HashMap<String, VirtualField>,
     keys_sent: usize,
@@ -78,6 +80,9 @@ impl Desktop for Fake {
     }
     fn mouse_down(&mut self) -> bool {
         self.0.lock().unwrap().mouse
+    }
+    fn sees_clicks(&mut self) -> bool {
+        self.0.lock().unwrap().clicks
     }
     fn failsafe_triggered(&mut self) -> bool {
         self.0.lock().unwrap().failsafe
@@ -806,4 +811,73 @@ fn a_button_already_held_when_the_countdown_starts_isnt_a_click() {
     assert_eq!(r.handle.join().unwrap(), "completed");
     assert!(t0.elapsed() < Duration::from_millis(1500), "the countdown kept restarting while a button was held");
     assert_eq!(fake.text("doc"), "ab");
+}
+
+/// A desktop that reports clicks, with Typewriter focused when Start is pressed.
+fn clicking_desktop() -> Fake {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().clicks = true;
+    fake.focus(win("tw", OWN, "Typewriter"));
+    fake
+}
+
+#[test]
+fn the_window_the_system_focuses_after_start_waits_for_a_click_before_counting_down() {
+    // Run 25 on Windows: Typewriter minimized, the browser behind it got focus by itself, the
+    // countdown ran out before the click into the page, and "Hello" was lost.
+    let fake = clicking_desktop();
+    let r = start(&fake, events_for("Hello", 2.0), 200);
+    thread::sleep(Duration::from_millis(50));
+    fake.focus(win("doc", 42, "Doc"));
+    thread::sleep(Duration::from_millis(900));
+    assert_eq!(fake.keys(), 0, "typing began without a click");
+    assert!(!phases(&r.updates).contains(&"countdown".to_string()), "the countdown started without a click");
+    assert!(
+        r.updates.lock().unwrap().iter().any(|u| u.reason.as_deref() == Some("click-to-start") && u.message.as_deref().is_some_and(|m| m.contains("starts from your click"))),
+        "the user is asked to click"
+    );
+    let clicked_at = Instant::now();
+    fake.click();
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    let first = fake.0.lock().unwrap().first_key_at.unwrap();
+    assert!(first.duration_since(clicked_at) >= Duration::from_millis(190), "typing began before a full countdown after the click");
+    assert_eq!(fake.text("doc"), "Hello");
+}
+
+#[test]
+fn after_the_handover_switching_to_another_window_starts_the_countdown() {
+    let fake = clicking_desktop();
+    let r = start(&fake, events_for("abc", 2.0), 150);
+    thread::sleep(Duration::from_millis(50));
+    fake.focus(win("behind", 7, "Whatever was behind Typewriter"));
+    thread::sleep(Duration::from_millis(300));
+    fake.focus(win("doc", 42, "Doc")); // Alt+Tab
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), "abc");
+    assert_eq!(fake.text("behind"), "");
+}
+
+#[test]
+fn going_back_to_typewriter_and_out_again_starts_the_countdown_without_a_click() {
+    let fake = clicking_desktop();
+    let r = start(&fake, events_for("abc", 2.0), 150);
+    thread::sleep(Duration::from_millis(50));
+    fake.focus(win("doc", 42, "Doc"));
+    thread::sleep(Duration::from_millis(300));
+    fake.focus(win("tw", OWN, "Typewriter"));
+    thread::sleep(Duration::from_millis(100));
+    fake.focus(win("doc", 42, "Doc"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), "abc");
+}
+
+#[test]
+fn a_window_chosen_later_without_a_click_starts_the_countdown() {
+    // Typewriter stayed open (minimizing is off): the user switches with the keyboard after a while.
+    let fake = clicking_desktop();
+    let r = start(&fake, events_for("abc", 2.0), 150);
+    thread::sleep(Duration::from_millis(1700));
+    fake.focus(win("doc", 42, "Doc"));
+    assert_eq!(r.handle.join().unwrap(), "completed");
+    assert_eq!(fake.text("doc"), "abc");
 }

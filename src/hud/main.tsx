@@ -32,6 +32,8 @@ function detail(u: NativeUpdate | null): string {
     case "preparing":
       return `${u.message ?? "Getting the keyboard ready…"} Nothing is typed yet.`;
     case "waiting":
+      // The system focused a window by itself when Typewriter minimized: the click counts.
+      if (u.reason === "click-to-start") return "The countdown starts from your click. Nothing is typed yet.";
       return "Typing starts after the countdown. Nothing is typed yet.";
     case "countdown":
       return "Keep the cursor where the text should go. A click starts the countdown again.";

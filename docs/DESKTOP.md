@@ -53,7 +53,7 @@ The build is reproducible from the lockfiles (`package-lock.json`, `src-tauri/Ca
 3. Under **Session settings › Output**, choose **Into another app**. The panel says whether typing is available on this computer and, if not, why.
 4. Press **Type into app**. Typewriter minimises itself (you can turn this off), and a small **status window** stays on top. It first says **Getting ready** while the keyboard is prepared (usually well under a second; a text with many symbols that aren't on your keyboard takes longer on Linux, and the window counts them).
 5. Click into your document **exactly where the text should start**.
-6. A countdown runs (5 seconds by default; you can set 2–30). It starts again whenever you click or switch to another window, so it always runs in full after your last click. When it ends, Typewriter types into the window you clicked into.
+6. A countdown runs (5 seconds by default; you can set 2–30). It starts from your click: the window that gets focus by itself when Typewriter minimizes doesn't start it (the status window says "Click into your document"). It starts again whenever you click or switch to another window, so it always runs in full after your last click. When it ends, Typewriter types into the window you clicked into.
 
 ### If typing doesn't start
 
@@ -95,7 +95,7 @@ If the emergency shortcut couldn't be registered (another app may own it), the w
 
 ### Safety rules
 
-- **Nothing types before the countdown ends.** The countdown starts only once Typewriter itself no longer has focus, and starts over after every click and every switch to another window. (When Typewriter minimises itself, the system focuses whatever window was behind it; the countdown doesn't run out before you've clicked into your document.) If you come back to Typewriter, it waits again.
+- **Nothing types before the countdown ends.** The countdown starts only once Typewriter itself no longer has focus, and starts over after every click and every switch to another window. (When Typewriter minimises itself, the system focuses whatever window was behind it. That doesn't start the countdown: your click into the document does, or a switch to another window. Clicks are counted as events, so a quick touchpad tap counts too.) If you come back to Typewriter, it waits again.
 - **It never types into Typewriter itself.**
 - **Switching windows or browser tabs makes typing wait.** Nothing goes into the other window or tab. When the window and tab you started in have focus again, a short countdown runs and typing continues by itself. Pressing **Pause** meanwhile makes it your pause: then only **Resume** continues. Pressing **Resume** while another tab of the same browser window shows continues in that tab. Browser tabs are told apart by the window title (unread counts like "(3)" are ignored).
 - **Password fields and login windows are refused:**

@@ -70,7 +70,8 @@ pub fn keysym_for(c: char) -> u32 {
 /// Whether keys can be sent on this display: an X11 connection with XTest.
 pub fn probe() -> Result<(), String> {
     let (conn, _) = x11rb::connect(None).map_err(|e| format!("can't connect to the X11 display ({e})."))?;
-    conn.xtest_get_version(2, 2).map_err(|e| e.to_string())?.reply().map_err(|_| "the X server has no XTest extension.".to_string())?;
+    // x11rb refuses the request itself when the server lacks XTest, so both steps mean the same.
+    conn.xtest_get_version(2, 2).ok().and_then(|c| c.reply().ok()).ok_or_else(|| "the X server has no XTest extension.".to_string())?;
     Ok(())
 }
 
@@ -83,7 +84,7 @@ impl XTyper {
     pub fn connect(cancelled: &dyn Fn() -> bool) -> Result<Self, String> {
         let keymap = crate::platform::lock_unless(&KEYMAP, cancelled).ok_or(CANCELLED)?;
         let (conn, screen) = x11rb::connect(None).map_err(|e| e.to_string())?;
-        conn.xtest_get_version(2, 2).map_err(|e| e.to_string())?.reply().map_err(|_| "The X server has no XTest extension.".to_string())?;
+        conn.xtest_get_version(2, 2).ok().and_then(|c| c.reply().ok()).ok_or_else(|| "The X server has no XTest extension.".to_string())?;
         let root = conn.setup().roots[screen].root;
         let (min_kc, max_kc) = (conn.setup().min_keycode, conn.setup().max_keycode);
         let map = conn.get_keyboard_mapping(min_kc, max_kc - min_kc + 1).map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?;

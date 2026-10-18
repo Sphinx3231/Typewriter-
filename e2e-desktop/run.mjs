@@ -511,7 +511,12 @@ async function main() {
     await prepare("secret words", { seconds: 4, mistakes: "Off", minimize: true, countdown: 2 });
     await ui(`(__tw.click("btn-start"), 1)`);
     await sleep(400);
-    xdo("windowactivate", "--sync", await windowId("Sign in - Accounts"));
+    const login = await windowId("Sign in - Accounts");
+    xdo("windowactivate", "--sync", login);
+    // The user clicks into the sign-in page (a window that only got focus by itself, right
+    // after Start, doesn't start the countdown).
+    const lg = Object.fromEntries(xdo("getwindowgeometry", "--shell", login).split("\n").map((l) => l.split("=")));
+    xdo("mousemove", String(Number(lg.X) + 400), String(Number(lg.Y) + 420), "click", "1");
     try {
       await until(async () => (await state()).status === "Paused", 8000, "refusal");
     } catch (e) {
@@ -577,6 +582,9 @@ async function main() {
     await ui(`(__tw.setText(${JSON.stringify(second)}), 1)`);
     await sleep(150);
     await ui(`(__tw.click("btn-start"), 1)`);
+    // The document already has focus; the user's click into it starts the countdown.
+    await sleep(300);
+    await focusDoc();
     try {
       await until(async () => (await state()).status === "Sent", 30000, "second session");
     } catch (e) {

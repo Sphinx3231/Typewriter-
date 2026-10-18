@@ -115,6 +115,9 @@ describe("status window (HUD)", () => {
     expect(label()).toBe("Click into your document");
     expect(detail()).toBe("Typing starts after the countdown. Nothing is typed yet.");
     expect(buttons()).toEqual(["Stop"]);
+    f.push({ phase: "waiting", reason: "click-to-start", message: "Click into your document where the text should go. The countdown starts from your click." });
+    expect(label()).toBe("Click into your document");
+    expect(detail()).toBe("The countdown starts from your click. Nothing is typed yet.");
 
     f.push({ phase: "countdown", countdownMs: 2500 });
     expect(label()).toBe("Starting in 3");

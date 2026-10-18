@@ -85,6 +85,17 @@ pub trait Desktop {
     fn mouse_down(&mut self) -> bool {
         false
     }
+    /// True when clicks can be seen (`clicks` or `mouse_down`). Then a window that takes focus by
+    /// itself right after Start doesn't start the countdown; the user's click does.
+    fn sees_clicks(&mut self) -> bool {
+        false
+    }
+    /// How many left or right button presses there have been since this desktop was created
+    /// (the session's start). Counted as events, so a click too short for `mouse_down` to
+    /// catch still counts.
+    fn clicks(&mut self) -> u64 {
+        0
+    }
     /// Send one key action to the focused window.
     fn send(&mut self, action: &KeyAction) -> Result<(), String>;
     /// Called once with every character the session will type, before the
@@ -224,6 +235,9 @@ pub struct RealDesktop {
     x11: Option<linux::X11>,
     #[cfg(target_os = "linux")]
     typer: Option<crate::xtyper::XTyper>,
+    /// Windows/macOS: the system's click count when this desktop was created.
+    #[cfg(not(target_os = "linux"))]
+    clicks_base: u64,
 }
 
 impl RealDesktop {
@@ -231,6 +245,12 @@ impl RealDesktop {
     /// previous session to release the keymap; the result is then a Support with
     /// state "cancelled".
     pub fn new(cancelled: &dyn Fn() -> bool) -> Result<Self, Support> {
+        // Clicks count from here, before any wait below: a click into the document while the
+        // previous session cleans up must still count.
+        #[cfg(not(target_os = "linux"))]
+        let clicks_base = os::clicks();
+        #[cfg(target_os = "linux")]
+        let x11 = linux::X11::connect();
         let support = check_support(false);
         if !support.available {
             return Err(support);
@@ -254,12 +274,12 @@ impl RealDesktop {
                 Err(_) => None,
             };
             let enigo = if typer.is_some() { None } else { Some(new_enigo()?) };
-            Ok(Self { enigo, x11: linux::X11::connect(), typer })
+            Ok(Self { enigo, x11, typer })
         }
         #[cfg(not(target_os = "linux"))]
         {
             let _ = cancelled;
-            Ok(Self { enigo: Some(new_enigo()?) })
+            Ok(Self { enigo: Some(new_enigo()?), clicks_base })
         }
     }
 }
@@ -297,6 +317,28 @@ impl Desktop for RealDesktop {
             return p.x <= 1 && p.y <= 1;
         }
         matches!(self.enigo.as_ref().map(|e| e.location()), Some(Ok((x, y))) if x <= 1 && y <= 1)
+    }
+
+    fn sees_clicks(&mut self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.x11.as_ref().and_then(|x| x.pointer()).is_some()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
+        }
+    }
+
+    fn clicks(&mut self) -> u64 {
+        #[cfg(target_os = "linux")]
+        {
+            self.x11.as_ref().map(|x| x.clicks()).unwrap_or(0)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            os::clicks().saturating_sub(self.clicks_base)
+        }
     }
 
     fn mouse_down(&mut self) -> bool {
@@ -367,11 +409,14 @@ impl Desktop for RealDesktop {
 mod os {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
-    use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel, TOKEN_MANDATORY_LABEL, TOKEN_QUERY};
     use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_RBUTTON, VK_RWIN, VK_SHIFT};
-    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsHungAppWindow, GUITHREADINFO};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId, IsHungAppWindow, SetWindowsHookExW, GUITHREADINFO, MSG, WH_MOUSE_LL,
+        WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+    };
 
     /// Uses UI Automation to ask whether the focused control is a password box.
     pub fn sensitive_focus() -> Option<String> {
@@ -388,6 +433,31 @@ mod os {
 
     pub fn modifiers_held() -> bool {
         unsafe { [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| (GetAsyncKeyState(k.0 as i32) as u16 & 0x8000) != 0) }
+    }
+
+    static CLICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static HOOK: std::sync::Once = std::sync::Once::new();
+
+    unsafe extern "system" fn on_mouse(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if code >= 0 && (w.0 as u32 == WM_LBUTTONDOWN || w.0 as u32 == WM_RBUTTONDOWN) {
+            CLICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        unsafe { CallNextHookEx(None, code, w, l) }
+    }
+
+    /// Left and right button presses since the first call. A low-level mouse hook on its own
+    /// thread counts them as they happen; polling the button state misses very short clicks
+    /// (touchpad taps, automation tools).
+    pub fn clicks() -> u64 {
+        HOOK.call_once(|| {
+            std::thread::spawn(|| unsafe {
+                if SetWindowsHookExW(WH_MOUSE_LL, Some(on_mouse), None, 0).is_ok() {
+                    let mut msg = MSG::default();
+                    while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+                }
+            });
+        });
+        CLICKS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The physical left or right mouse button is down.
@@ -478,6 +548,12 @@ mod os {
     extern "C" {
         fn CGEventSourceFlagsState(state_id: i32) -> u64;
         fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
+        fn CGEventSourceCounterForEventType(state_id: i32, event_type: u32) -> u32;
+    }
+
+    /// Left and right mouse-down events so far (kCGEventLeftMouseDown = 1, RightMouseDown = 3).
+    pub fn clicks() -> u64 {
+        unsafe { CGEventSourceCounterForEventType(0, 1) as u64 + CGEventSourceCounterForEventType(0, 3) as u64 }
     }
 
     /// The left or right mouse button is down (combined session state).
@@ -513,6 +589,16 @@ mod linux {
     use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt, KeyButMask, Window};
     use x11rb::rust_connection::RustConnection;
 
+    /// Subscribes a new connection to raw button presses on all master devices (XInput 2.0).
+    fn raw_buttons(root: Window) -> Option<RustConnection> {
+        use x11rb::protocol::xinput::{self, ConnectionExt as _};
+        let (conn, _) = x11rb::connect(None).ok()?;
+        conn.xinput_xi_query_version(2, 0).ok()?.reply().ok()?;
+        let mask = xinput::EventMask { deviceid: 1, mask: vec![xinput::XIEventMask::RAW_BUTTON_PRESS] };
+        conn.xinput_xi_select_events(root, &[mask]).ok()?.check().ok()?;
+        Some(conn)
+    }
+
     #[derive(Clone, Copy)]
     pub struct Pointer {
         pub x: i16,
@@ -531,6 +617,10 @@ mod linux {
         utf8: Atom,
         // Pointer and modifiers come from one query; reuse it briefly.
         pointer: Cell<Option<(Instant, Pointer)>>,
+        // A second connection that receives XInput2 raw button presses from every device, so a
+        // click shorter than a polling interval still counts.
+        raw: Option<RustConnection>,
+        clicks: Cell<u64>,
     }
 
     impl X11 {
@@ -543,10 +633,26 @@ mod linux {
                 pid: atom("_NET_WM_PID")?,
                 name: atom("_NET_WM_NAME")?,
                 utf8: atom("UTF8_STRING")?,
+                raw: raw_buttons(root),
                 conn,
                 root,
                 pointer: Cell::new(None),
+                clicks: Cell::new(0),
             })
+        }
+
+        /// Left and right button presses seen so far (the wheel and middle button aren't clicks).
+        pub fn clicks(&self) -> u64 {
+            if let Some(raw) = &self.raw {
+                while let Ok(Some(ev)) = raw.poll_for_event() {
+                    if let x11rb::protocol::Event::XinputRawButtonPress(e) = ev {
+                        if e.detail == 1 || e.detail == 3 {
+                            self.clicks.set(self.clicks.get() + 1);
+                        }
+                    }
+                }
+            }
+            self.clicks.get()
         }
 
         fn window_prop(&self, w: Window, prop: Atom, ty: Atom, len: u32) -> Option<x11rb::protocol::xproto::GetPropertyReply> {
