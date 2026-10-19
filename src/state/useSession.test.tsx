@@ -3,10 +3,14 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bridge, NativeUpdate, Support } from "../desktop/bridge";
 import { DEFAULT_SETTINGS, type PlaybackSettings } from "../engine";
+import { TypedBuffer } from "../engine/buffer";
+import type { Step } from "../engine/script";
+import type { Tone } from "../humanize";
+import { NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "../humanize/fixtures";
 import type { Host } from "../platform";
 import { DEFAULT_PREFS, useSession, type HistoryEntry } from "./useSession";
 
-const env = vi.hoisted(() => ({ host: "web" as "web" | "desktop" | "extension", bridge: null as unknown, bridges: 0 }));
+const env = vi.hoisted(() => ({ host: "web" as "web" | "desktop" | "extension", bridge: null as unknown, bridges: 0, brokenChecklist: false, humanizeCalls: [] as string[] }));
 
 vi.mock("../platform", () => ({
   currentHost: () => env.host,
@@ -20,6 +24,21 @@ vi.mock("../desktop/bridge", async (orig) => ({
     return env.bridge;
   },
 }));
+// The real Smart Humanization engine, recording what it was asked to check and, when a test asks, with a checklist that crashes.
+vi.mock("../humanize", async (orig) => {
+  const m = await orig<typeof import("../humanize")>();
+  return {
+    ...m,
+    humanize: (source: string, tone: Tone) => {
+      env.humanizeCalls.push(source);
+      if (!env.brokenChecklist) return m.humanize(source, tone);
+      const crash = () => {
+        throw new Error("checklist crashed");
+      };
+      return m.humanize(source, tone, { runChecks: crash, rewrite: m.rewrite });
+    },
+  };
+});
 vi.mock("../extension/bridge", () => ({
   extensionBridge: () => {
     env.bridges++;
@@ -67,6 +86,8 @@ beforeEach(() => {
   env.host = "web";
   env.bridge = null;
   env.bridges = 0;
+  env.brokenChecklist = false;
+  env.humanizeCalls = [];
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -456,5 +477,227 @@ describe("useSession: typing into another app", () => {
     act(() => void result.current.stop());
     expect(result.current.snapshot.status).toBe("stopped");
     expect(f.bridge.control).toHaveBeenCalledWith("stop");
+  });
+});
+
+describe("useSession: Smart Humanization", () => {
+  /** Plays the current text in the preview to the end and returns exactly what was typed. */
+  function typeIt(result: { current: ReturnType<typeof useSession> }): string {
+    let ok = false;
+    act(() => void (ok = result.current.start()));
+    expect(ok).toBe(true);
+    advance(120_000);
+    expect(result.current.snapshot.status).toBe("completed");
+    return result.current.controller.buffer.text();
+  }
+  const on = (result: { current: ReturnType<typeof useSession> }) => act(() => void result.current.humanize.setEnabled(true));
+
+  it("is off by default: nothing is checked and the original is typed exactly", () => {
+    const { result } = setup();
+    act(() => result.current.setText(ROBOTIC));
+    expect(result.current.prefs.smartHumanize).toBe(false);
+    expect(result.current.humanize).toMatchObject({ enabled: false, checking: false, result: null, usingOriginal: false, prepared: ROBOTIC });
+    expect(env.humanizeCalls).toEqual([]);
+    expect(typeIt(result)).toBe(ROBOTIC);
+    expect(result.current.controller.getSource()).toBe(ROBOTIC);
+  });
+
+  it("turned on, checks pasted text automatically and types the humanized copy exactly; the original is kept", () => {
+    const { result } = setup();
+    on(result);
+    expect(result.current.prefs.smartHumanize).toBe(true);
+    expect(JSON.parse(localStorage.getItem("typewriter:prefs")!).smartHumanize).toBe(true);
+    act(() => result.current.setText(ROBOTIC));
+    const h = result.current.humanize;
+    expect(h.result).toMatchObject({ status: "humanized", source: ROBOTIC, output: ROBOTIC_HUMANIZED });
+    expect(h.result!.score!).toBeGreaterThanOrEqual(50);
+    expect(h.prepared).toBe(ROBOTIC_HUMANIZED);
+    // No approval step: the prepared copy is already what the preview holds.
+    expect(result.current.snapshot.status).toBe("ready");
+    expect(result.current.controller.getSource()).toBe(ROBOTIC_HUMANIZED);
+    // The plan (duration, stats of what is typed) follows the copy that is typed.
+    expect(result.current.script.source).toBe(ROBOTIC_HUMANIZED);
+
+    expect(typeIt(result)).toBe(ROBOTIC_HUMANIZED);
+    expect(result.current.text).toBe(ROBOTIC);
+    expect(result.current.history[0].characters).toBe([...ROBOTIC_HUMANIZED].length);
+  });
+
+  it("leaves text that scores below 50% unchanged", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(NATURAL));
+    expect(result.current.humanize.result).toMatchObject({ status: "no-change-needed" });
+    expect(result.current.humanize.result!.score!).toBeLessThan(50);
+    expect(result.current.humanize.prepared).toBe(NATURAL);
+    expect(typeIt(result)).toBe(NATURAL);
+  });
+
+  it("leaves short text unchanged without a score", () => {
+    const { result } = setup();
+    on(result);
+    const short = "Moreover, we utilize it. Furthermore, numerous things.";
+    act(() => result.current.setText(short));
+    expect(result.current.humanize.result).toMatchObject({ status: "too-short", score: null });
+    expect(typeIt(result)).toBe(short);
+  });
+
+  it("turning it off restores exact-source typing", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    expect(result.current.controller.getSource()).toBe(ROBOTIC_HUMANIZED);
+    act(() => void result.current.humanize.setEnabled(false));
+    expect(result.current.humanize).toMatchObject({ enabled: false, result: null, prepared: ROBOTIC });
+    expect(result.current.controller.getSource()).toBe(ROBOTIC);
+    expect(typeIt(result)).toBe(ROBOTIC);
+  });
+
+  it("can type the original instead, and goes back to the humanized copy on request or when the text changes", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.humanize.typeOriginal());
+    expect(result.current.humanize).toMatchObject({ usingOriginal: true, prepared: ROBOTIC });
+    expect(result.current.humanize.result!.output).toBe(ROBOTIC_HUMANIZED); // both versions are kept
+    expect(typeIt(result)).toBe(ROBOTIC);
+
+    act(() => void result.current.humanize.typeHumanized());
+    expect(result.current.humanize).toMatchObject({ usingOriginal: false, prepared: ROBOTIC_HUMANIZED });
+    expect(typeIt(result)).toBe(ROBOTIC_HUMANIZED);
+
+    act(() => void result.current.humanize.typeOriginal());
+    const edited = ROBOTIC + " Moreover, schools utilize tablets.";
+    act(() => result.current.setText(edited));
+    expect(result.current.humanize.usingOriginal).toBe(false);
+    expect(result.current.humanize.result!.source).toBe(edited);
+    expect(result.current.humanize.prepared).toBe(ROBOTIC_HUMANIZED + " Schools use tablets.");
+  });
+
+  it("re-checks when the text or tone changes, always from the original, never from its own output", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    typeIt(result);
+    typeIt(result);
+    act(() => void result.current.restart());
+    advance(120_000);
+    expect(result.current.controller.buffer.text()).toBe(ROBOTIC_HUMANIZED);
+    // Every check ran on the user's original; the rewrite was never fed back in.
+    const checked = env.humanizeCalls.filter((s) => s !== ""); // the empty editor is checked once on mount
+    expect(checked.length).toBeGreaterThan(0);
+    expect(checked.every((s) => s === ROBOTIC)).toBe(true);
+    expect(env.humanizeCalls).not.toContain(ROBOTIC_HUMANIZED);
+    expect(result.current.text).toBe(ROBOTIC);
+
+    act(() => void result.current.humanize.setTone("formal"));
+    expect(result.current.prefs.humanizeTone).toBe("formal");
+    expect(result.current.humanize.tone).toBe("formal");
+    // A formal tone keeps formal wording, so the copy differs from the "any" copy but still comes from the original.
+    expect(result.current.humanize.result!.source).toBe(ROBOTIC);
+    expect(result.current.humanize.prepared).not.toBe(ROBOTIC_HUMANIZED);
+    expect(result.current.humanize.prepared).toContain("utilize");
+  });
+
+  it("checks very long text after the editing pause, and a start in between still checks the latest text first", () => {
+    const { result } = setup();
+    on(result);
+    const long = (ROBOTIC + "\n\n").repeat(40); // over the 20,000 characters that wait for a pause
+    act(() => result.current.setText(long));
+    expect(result.current.humanize.checking).toBe(true);
+    advance(350);
+    expect(result.current.humanize.checking).toBe(false);
+    expect(result.current.humanize.result!.status).toBe("humanized");
+
+    const longer = long + "Moreover, we utilize it in order to learn.";
+    act(() => result.current.setText(longer));
+    expect(result.current.humanize.checking).toBe(true);
+    act(() => void result.current.start());
+    const typed = result.current.controller.getSource();
+    expect(typed).not.toBe(longer);
+    expect(typed).toMatch(/[Ww]e use it to learn\.$/);
+    act(() => void result.current.stop());
+  });
+
+  it("never changes the text mid-session: the toggle, tone and choice wait until the session ends", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.start());
+    expect(result.current.humanize.locked).toBe(true);
+    advance(500);
+    act(() => void result.current.humanize.setEnabled(false));
+    act(() => void result.current.humanize.setTone("casual"));
+    act(() => void result.current.humanize.typeOriginal());
+    expect(result.current.humanize).toMatchObject({ enabled: true, tone: "any", usingOriginal: false });
+    act(() => void result.current.pause());
+    act(() => void result.current.humanize.setEnabled(false));
+    expect(result.current.humanize.enabled).toBe(true);
+    act(() => void result.current.resume());
+    advance(120_000);
+    expect(result.current.snapshot.status).toBe("completed");
+    expect(result.current.controller.buffer.text()).toBe(ROBOTIC_HUMANIZED);
+    expect(result.current.humanize.locked).toBe(false);
+  });
+
+  it("after a cancelled session, the toggle works and the next session types the right text", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.start());
+    advance(300);
+    act(() => void result.current.stop());
+    expect(result.current.snapshot.status).toBe("stopped");
+    expect(result.current.text).toBe(ROBOTIC);
+    act(() => void result.current.humanize.setEnabled(false));
+    expect(result.current.humanize.enabled).toBe(false);
+    expect(typeIt(result)).toBe(ROBOTIC);
+  });
+
+  it("when the checklist fails, says why and types the original exactly", () => {
+    env.brokenChecklist = true;
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    expect(result.current.humanize.result).toMatchObject({ status: "failed", error: "checklist crashed", output: ROBOTIC });
+    expect(result.current.humanize.prepared).toBe(ROBOTIC);
+    expect(typeIt(result)).toBe(ROBOTIC);
+  });
+
+  it("repairs saved preferences that are not valid", () => {
+    localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: "yes", humanizeTone: "pirate" }));
+    const { result } = setup();
+    expect(result.current.prefs).toMatchObject({ smartHumanize: false, humanizeTone: "any" });
+    localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: true, humanizeTone: "casual" }));
+    cleanup();
+    const again = setup();
+    expect(again.result.current.humanize).toMatchObject({ enabled: true, tone: "casual" });
+  });
+
+  it("sends the humanized copy, exactly, to another app", async () => {
+    const f = fakeBridge();
+    env.bridge = f.bridge;
+    const { result } = setup("desktop");
+    await flush();
+    act(() => result.current.setDestination("external"));
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.start());
+    await flush();
+    expect(f.bridge.start).toHaveBeenCalledTimes(1);
+    const [events, , , source] = f.bridge.start.mock.calls[0];
+    expect(source).toBe(ROBOTIC_HUMANIZED);
+    // The key events, played in order, produce exactly the humanized copy.
+    const replay = new TypedBuffer();
+    for (const e of events as Step[]) replay.apply(e);
+    expect(replay.text()).toBe(ROBOTIC_HUMANIZED);
+    f.update({ phase: "completed", index: (events as unknown[]).length, elapsedMs: 1000 });
+    expect(result.current.snapshot.status).toBe("completed");
+
+    // Off again: the original goes out exactly.
+    act(() => void result.current.humanize.setEnabled(false));
+    act(() => void result.current.start());
+    await flush();
+    expect(f.bridge.start.mock.calls[1][3]).toBe(ROBOTIC);
   });
 });

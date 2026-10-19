@@ -39,10 +39,16 @@ The app runs entirely on the user's device:
   key input through `chrome.debugger` (see `docs/EXTENSION.md`). The desktop app types into any
   app by sending real key presses through the operating system (see `docs/DESKTOP.md`). Both are local.
 
-### 3. The user's text is untouchable
+### 3. The user's text is untouchable (one opt-in exception)
 The final output must equal the source text exactly, character for character (see SPEC §2).
 Simulated typos may appear only temporarily during playback. Nothing may proofread,
 rewrite, or "fix" what the user wrote.
+
+The only exception is **Smart Humanization** (SPEC §2a, owner-approved 2026-10-19). It is off by
+default. When the user turns it on, a local, rule-based (no AI, no network) checklist may
+prepare a lightly edited copy, and the output must then equal that prepared copy exactly. The
+original is never modified, is kept for the whole session and can be restored. With it off,
+the rule above applies unchanged.
 
 ---
 

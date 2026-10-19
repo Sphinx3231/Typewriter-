@@ -56,6 +56,33 @@ export function SettingsPanel({ session }: { session: Session }) {
 
       <OutputSettings session={session} />
 
+      {/* ---- Smart Humanization (SPEC §2a) ---- */}
+      <div className="settings__group" data-testid="humanize-settings">
+        <h3 className="settings__heading">Smart Humanization</h3>
+        <Switch
+          checked={session.humanize.enabled}
+          onChange={session.humanize.setEnabled}
+          disabled={running}
+          label="Smart Humanization"
+          description="Checks your text against a writing-style checklist as you type or paste. At 50% or more, it types a copy with small wording edits, without asking. Your original is kept and can be typed instead. A style heuristic, not an AI detector. Runs on this device."
+        />
+        {session.humanize.enabled ? (
+          <Field label="Tone to aim for" hint="Used by the tone check. With Formal, formal wording is kept.">
+            <Segmented
+              label="Tone to aim for"
+              size="sm"
+              value={session.humanize.tone}
+              onChange={session.humanize.setTone}
+              options={[
+                { value: "any", label: "Any" },
+                { value: "casual", label: "Casual" },
+                { value: "formal", label: "Formal" },
+              ]}
+            />
+          </Field>
+        ) : null}
+      </div>
+
       {/* ---- timing ---- */}
       <div className="settings__group">
         <h3 className="settings__heading">Timing</h3>

@@ -59,6 +59,32 @@ The final output must match the original input exactly at the character level, i
 
 Never treat the realism engine as a text-editing or proofreading engine.
 
+# 2a. SMART HUMANIZATION (OPT-IN EXCEPTION TO §2, approved by the owner 2026-10-19)
+
+§2 applies whenever Smart Humanization is off, which is the default.
+
+When the user turns Smart Humanization on:
+- Every time the text changes, it is checked automatically against a local writing-style checklist. The checks look for:
+  - repetitive wording;
+  - redundant sentences;
+  - formulaic transitions;
+  - generic introductions or conclusions;
+  - overly formal or wordy phrasing;
+  - repetitive sentence structure;
+  - vague statements;
+  - a mismatch with the chosen tone.
+- Score = flagged applicable checks ÷ applicable checks × 100. Only applicable checks count. Text too short to judge, or with no applicable check, has no score and is left unchanged.
+- At 50% or more (exactly 50% included), a minimal rule-based rewrite prepares a lightly edited copy. Below 50%, the text is left unchanged. No confirmation is asked.
+- The rewrite must preserve:
+  - meaning, facts, names and numbers;
+  - quotations, citations, URLs and anything in brackets;
+  - line breaks and paragraphs.
+- The rewrite never invents content and never adds mistakes. A safety check compares the protected parts; if they differ, or the engine fails, the original text is typed and the status says so.
+- The score is a writing-style heuristic. It is never presented as detecting AI authorship.
+- The original is immutable. The rewrite is always derived from the original, never from a previous rewrite. The user can inspect both and type the original instead.
+- The final output must equal the prepared text exactly, character for character. Text is never changed during a running session.
+- It runs entirely on the device: no model, no network (CLAUDE.md rule 2).
+
 # 3. BRAND IDENTITY AND VISUAL DIRECTION
 
 Create a recognizable, professional identity for Typewriter.

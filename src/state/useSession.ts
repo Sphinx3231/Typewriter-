@@ -20,6 +20,7 @@ import { tauriBridge, type Bridge, type Support } from "../desktop/bridge";
 import { currentHost } from "../platform";
 import { ExternalController } from "../desktop/external";
 import type { VerifyResult } from "../desktop/verify";
+import { humanize, type HumanizeResult, type Tone } from "../humanize";
 import { readJSON, readString, removeKey, writeJSON, writeString } from "./storage";
 
 export type Destination = "preview" | "external";
@@ -36,9 +37,22 @@ export interface Preferences {
   countdownSec: number;
   /** Minimise Typewriter when external typing is armed, so the previous app comes forward. */
   minimizeWhileTyping: boolean;
+  /** Smart Humanization (SPEC §2a): check the writing style and, at 50% or more, type a lightly edited copy. Off by default. */
+  smartHumanize: boolean;
+  /** The tone the style checklist compares against. */
+  humanizeTone: Tone;
 }
 
-export const DEFAULT_PREFS: Preferences = { rememberText: false, keepHistory: true, volume: 0.6, destination: "preview", countdownSec: 5, minimizeWhileTyping: true };
+export const DEFAULT_PREFS: Preferences = {
+  rememberText: false,
+  keepHistory: true,
+  volume: 0.6,
+  destination: "preview",
+  countdownSec: 5,
+  minimizeWhileTyping: true,
+  smartHumanize: false,
+  humanizeTone: "any",
+};
 
 export interface HistoryEntry {
   id: string;
@@ -69,7 +83,13 @@ function settingsKey(s: PlaybackSettings) {
 }
 
 export function useSession() {
-  const [prefs, setPrefsState] = useState<Preferences>(() => ({ ...DEFAULT_PREFS, ...readJSON<Partial<Preferences>>("prefs", {}) }));
+  const [prefs, setPrefsState] = useState<Preferences>(() => {
+    const p = { ...DEFAULT_PREFS, ...readJSON<Partial<Preferences>>("prefs", {}) };
+    // Saved by an older version, or edited by hand: never let a bad value turn rewriting on.
+    if (typeof p.smartHumanize !== "boolean") p.smartHumanize = false;
+    if (!["any", "casual", "formal"].includes(p.humanizeTone)) p.humanizeTone = "any";
+    return p;
+  });
   const [settings, setSettingsState] = useState<PlaybackSettings>(() => normalizeSettings(readJSON("settings", null)));
   const [text, setTextState] = useState<string>(() => (prefs.rememberText ? readString("text") ?? "" : ""));
   const [history, setHistory] = useState<HistoryEntry[]>(() => {
@@ -147,8 +167,27 @@ export function useSession() {
   const planning = deferredText !== text;
   const realism = realismKey(settings);
   const graphemesStats = useMemo(() => computeStats(deferredText), [deferredText]);
+
+  // ---- Smart Humanization (SPEC §2a) ----
+  // `text` is the immutable original: the editor never shows a rewrite. When the feature is on,
+  // the text to type is derived from the original every time, never from a previous rewrite.
+  const humanizeOn = prefs.smartHumanize;
+  const tone = prefs.humanizeTone;
+  const humanized = useMemo<HumanizeResult | null>(() => (humanizeOn ? humanize(deferredText, tone) : null), [humanizeOn, deferredText, tone]);
+  /** The original the user chose to type as written while the feature is on (until the text changes). */
+  const [originalFor, setOriginalFor] = useState<string | null>(null);
+  const prepare = useCallback(
+    (src: string): string => {
+      if (!humanizeOn || originalFor === src) return src;
+      return (humanized && humanized.source === src ? humanized : humanize(src, tone)).output;
+    },
+    [humanizeOn, originalFor, humanized, tone],
+  );
+  /** What a session started now would type. */
+  const prepared = prepare(deferredText);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const script = useMemo(() => buildScript(deferredText, settings), [deferredText, realism]);
+  const script = useMemo(() => buildScript(prepared, settings), [prepared, realism]);
   const est = useMemo(
     () => estimate(script, settings),
     [script, settings.timingMode, settings.durationSec, settings.wpm], // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,15 +208,15 @@ export function useSession() {
       loadedFor.current = controller;
       loaded.current = null;
     }
-    const textChanged = loaded.current?.text !== deferredText;
+    const textChanged = loaded.current?.text !== prepared;
     const keyChanged = loaded.current?.key !== currentKey;
     if (st === "completed" || st === "stopped" || st === "error") {
       if (!textChanged) return; // keep the finished output on screen until the text changes or playback starts again
     } else if (!textChanged && !keyChanged) return;
     const usable = !isBlank(deferredText) && issues.length === 0;
-    controller.load(deferredText, usable ? buildTimeline(script, settings) : null);
-    loaded.current = { text: deferredText, key: currentKey };
-  }, [deferredText, currentKey, script, issues.length, controller]); // eslint-disable-line react-hooks/exhaustive-deps
+    controller.load(prepared, usable ? buildTimeline(script, settings) : null);
+    loaded.current = { text: prepared, key: currentKey };
+  }, [prepared, currentKey, script, issues.length, controller]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const settingsChangedSinceStart =
     !!loaded.current && (snapshot.status === "playing" || snapshot.status === "paused" || snapshot.status === "completed" || snapshot.status === "stopped") &&
@@ -238,6 +277,11 @@ export function useSession() {
 
   const updateSettings = useCallback((patch: Partial<PlaybackSettings>) => setSettingsState((s) => ({ ...s, ...patch })), []);
   const updatePrefs = useCallback((patch: Partial<Preferences>) => setPrefsState((p) => ({ ...p, ...patch })), []);
+  /** Changes to Smart Humanization wait until no session is running: text never changes mid-session. */
+  const idle = useCallback(() => {
+    const st = controller.getStatus();
+    return st !== "playing" && st !== "paused";
+  }, [controller]);
 
   /** Build a fresh timeline from the current text and settings, then play it from the start. */
   const start = useCallback((): boolean => {
@@ -246,15 +290,17 @@ export function useSession() {
     sound.setEnabled(settings.sound);
     const st = controller.getStatus();
     if (st === "playing" || st === "paused") controller.stop();
-    const sc = text === deferredText && realismKey(settings) === realism ? script : buildScript(text, settings);
+    // The checklist and any rewrite finish here, synchronously, before anything is typed.
+    const out = prepare(text);
+    const sc = out === prepared && realismKey(settings) === realism ? script : buildScript(out, settings);
     const tl = buildTimeline(sc, settings);
     if (controller instanceof ExternalController)
       controller.configure({ countdownMs: Math.round(prefs.countdownSec * 1000), minimize: prefs.minimizeWhileTyping });
-    controller.load(text, tl);
-    loaded.current = { text, key: settingsKey(settings) };
+    controller.load(out, tl);
+    loaded.current = { text: out, key: settingsKey(settings) };
     sessionStart.current = { at: new Date().toISOString(), mistakes: sc.mistakes };
     return controller.start();
-  }, [text, deferredText, settings, realism, script, controller, sound, prefs.countdownSec, prefs.minimizeWhileTyping]);
+  }, [text, prepare, prepared, settings, realism, script, controller, sound, prefs.countdownSec, prefs.minimizeWhileTyping]);
 
   const pause = useCallback(() => controller.pause(), [controller]);
   const resume = useCallback(() => {
@@ -296,9 +342,29 @@ export function useSession() {
     [updateSettings],
   );
 
+  const running = snapshot.status === "playing" || snapshot.status === "paused";
+  const humanizeState = {
+    enabled: humanizeOn,
+    tone,
+    /** The checklist hasn't caught up with the latest edit yet. */
+    checking: humanizeOn && planning,
+    /** The checklist result for the current original (null when off). */
+    result: humanized,
+    /** The user chose to type the original as written. */
+    usingOriginal: humanizeOn && originalFor === deferredText,
+    /** Exactly what a session started now types. */
+    prepared,
+    locked: running,
+    setEnabled: (on: boolean) => idle() && updatePrefs({ smartHumanize: on }),
+    setTone: (t: Tone) => idle() && updatePrefs({ humanizeTone: t }),
+    typeOriginal: () => idle() && setOriginalFor(deferredText),
+    typeHumanized: () => idle() && setOriginalFor(null),
+  };
+
   return {
     text,
     setText,
+    humanize: humanizeState,
     stats: graphemesStats,
     planning,
     blank,

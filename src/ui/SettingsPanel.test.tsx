@@ -32,6 +32,7 @@ type Harness = {
   status?: PlaybackStatus;
   est?: Partial<Estimate>;
   script?: Partial<Script>;
+  humanize?: { enabled: boolean; tone?: string };
 };
 
 /**
@@ -40,7 +41,7 @@ type Harness = {
  * fields to reach states that need very specific numbers.
  */
 function setup(h: Harness = {}) {
-  const spies = { set: vi.fn(), applyDuration: vi.fn(), newVariation: vi.fn() };
+  const spies = { set: vi.fn(), applyDuration: vi.fn(), newVariation: vi.fn(), setHumanize: vi.fn(), setTone: vi.fn() };
   let latest: Session = null as unknown as Session;
   function Live() {
     const text = h.text ?? TEXT;
@@ -60,6 +61,7 @@ function setup(h: Harness = {}) {
       script: { ...script, ...h.script },
       applyDuration: spies.applyDuration,
       newVariation: spies.newVariation,
+      humanize: { enabled: false, tone: "any", ...h.humanize, setEnabled: spies.setHumanize, setTone: spies.setTone },
     } as unknown as Session;
     latest = session;
     return <SettingsPanel session={session} />;
@@ -434,5 +436,34 @@ describe("variation seed", () => {
   it("pads short seeds", () => {
     setup({ settings: { seed: 42 } });
     expect(screen.getByText("Variation #00042")).toBeTruthy();
+  });
+});
+
+describe("Smart Humanization settings", () => {
+  const toggle = () => screen.getByRole("switch", { name: /Smart Humanization/ });
+
+  it("is off by default, explains itself honestly, and turns on with one click", async () => {
+    const { setHumanize } = setup();
+    const group = screen.getByTestId("humanize-settings");
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    expect(within(group).getByText(/A style heuristic, not an AI detector\. Runs on this device\./)).toBeTruthy();
+    expect(within(group).queryByRole("radiogroup", { name: "Tone to aim for" })).toBeNull();
+    await userEvent.click(toggle());
+    expect(setHumanize).toHaveBeenCalledWith(true);
+  });
+
+  it("when on, offers the tone and can be turned off", async () => {
+    const { setHumanize, setTone } = setup({ humanize: { enabled: true, tone: "any" } });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(checked("Any")).toBe(true);
+    await userEvent.click(radio("Formal"));
+    expect(setTone).toHaveBeenCalledWith("formal");
+    await userEvent.click(toggle());
+    expect(setHumanize).toHaveBeenCalledWith(false);
+  });
+
+  it.each<PlaybackStatus>(["playing", "paused"])("can't be switched while %s", (status) => {
+    setup({ status, humanize: { enabled: true } });
+    expect((toggle() as HTMLButtonElement).disabled).toBe(true);
   });
 });

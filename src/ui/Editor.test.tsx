@@ -18,6 +18,7 @@ function fakeSession(text: string, status: PlaybackStatus = text ? "ready" : "em
     blank: isBlank(text),
     planning: false,
     snapshot: { status },
+    humanize: { enabled: false },
     ...over,
   } as unknown as Session;
 }
@@ -109,5 +110,18 @@ describe("Editor", () => {
   it("shows that the estimate is being updated", () => {
     render(<Editor session={fakeSession("Some words", "ready", { planning: true })} />);
     expect(document.getElementById("editor-note")!.textContent).toBe("Updating estimate…");
+  });
+
+  it("says the original is never changed, and with Smart Humanization on, that a lightly edited copy may be typed", () => {
+    render(<Editor session={fakeSession("Some words", "ready")} />);
+    expect(screen.getByText("This is the original. Typewriter never changes it.")).toBeTruthy();
+    expect(screen.queryByTestId("humanize-status")).toBeNull();
+    cleanup();
+    const text = "Short text.";
+    const humanize = { enabled: true, checking: false, result: { status: "too-short", score: null, edits: [], checks: [] }, usingOriginal: false };
+    render(<Editor session={fakeSession(text, "ready", { humanize } as unknown as Partial<Session>)} />);
+    expect(screen.getByText("This is your original, kept unchanged. Smart Humanization may type a lightly edited copy (see below).")).toBeTruthy();
+    expect(screen.getByTestId("humanize-headline").textContent).toBe("Too short to check");
+    expect((screen.getByRole("textbox", { name: "Your text" }) as HTMLTextAreaElement).value).toBe(text);
   });
 });

@@ -1934,3 +1934,103 @@ fieldset:disabled .segmented__opt {
   gap: var(--sp-2);
   margin-top: var(--sp-5);
 }
+
+/* ---- Smart Humanization status (under the editor) ---- */
+.humanize {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.humanize--done {
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  background: var(--primary-soft);
+}
+.humanize--error {
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  background: var(--warning-soft);
+}
+.humanize__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.humanize__line svg {
+  flex: none;
+}
+.humanize--error .humanize__line svg {
+  color: var(--warning);
+}
+.humanize__detail {
+  color: var(--text-muted);
+}
+.humanize__more {
+  margin-top: 6px;
+}
+.humanize__more summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.humanize__note {
+  margin: 6px 0;
+  color: var(--text-muted);
+}
+.humanize__checks,
+.humanize__edits {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+.humanize__checks li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.humanize__checks li.is-na {
+  color: var(--text-muted);
+}
+.humanize__checks li.is-flagged svg {
+  color: var(--warning);
+}
+.humanize__evidence {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.humanize__edits del {
+  color: var(--text-muted);
+}
+.humanize__edits ins {
+  text-decoration: none;
+  font-weight: 600;
+}
+.humanize__compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.humanize__compare label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+}
+.humanize__compare textarea {
+  min-height: 110px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.humanize__actions {
+  display: flex;
+  gap: 8px;
+}
