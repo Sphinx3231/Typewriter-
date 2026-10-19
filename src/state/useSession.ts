@@ -271,6 +271,7 @@ export function useSession() {
       const st = controller.getStatus();
       if (st === "playing" || st === "paused") return; // the editor is locked during playback
       setTextState(t);
+      setOriginalFor(null); // any edit is checked afresh, and a choice to type the original applies to the text it was made for
     },
     [controller],
   );

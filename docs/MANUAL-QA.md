@@ -117,6 +117,22 @@ Use the same text with a 60 s duration.
 
 Send back: pass/fail per row, and a screenshot of anything that didn't match.
 
+## 2a. Smart Humanization (optional feature, off by default)
+
+Use **Into another app** with Notepad (or a Google Doc), 20 s, typing mistakes Medium.
+
+| # | Do this | Expected |
+|---|---|---|
+| 2a.1 | With Smart Humanization **off** (Settings), paste a formal essay (the sample below) and type it. | The document gets exactly what you pasted. No humanization line appears under the editor. |
+| 2a.2 | Turn Smart Humanization **on**, paste the same essay again. | Within a moment the line under the editor says "Humanized automatically" with a score (for example 71%). No dialog, no button to approve. |
+| 2a.3 | Open **Details**. | Every check is listed (flagged, fine or doesn't apply), every edit (before → after), the original and the humanized copy. The note says it is a style heuristic, not a detector. |
+| 2a.4 | Type it. Then press **Check copied text** after copying the document. | The document equals the "Humanized copy" box exactly (Verified). The editor still shows your original. |
+| 2a.5 | Press **Type my original instead**, type again. | The document equals your original exactly. |
+| 2a.6 | Paste a short or casual paragraph (a few lines about your day). | "No changes needed" or "Too short to check"; it types exactly what you pasted. |
+| 2a.7 | Start a session and try the switch while typing. | The switch is disabled until the session ends. |
+
+Sample essay: *In today's fast-paced world, technology plays a crucial role in education. Moreover, students utilize various digital tools in order to learn more effectively. Furthermore, teachers leverage numerous platforms in order to facilitate learning for every student. Additionally, it is important to note that schools commence new programs every year (Smith, 2021). In conclusion, technology plays a crucial role in education.*
+
 ## 3. Extension: side panel (Bug 2)
 
 1. After loading the unpacked extension, open any normal web page (not `chrome://`).

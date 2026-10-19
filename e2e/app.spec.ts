@@ -429,3 +429,72 @@ test("browser preview explains that typing into other apps needs the extension o
   await expect(page.getByText("To type into Google Docs or other apps, use the Typewriter Chrome extension or desktop app.")).toBeVisible();
   await expect(page.getByRole("radiogroup", { name: "Where to type" })).toHaveCount(0);
 });
+
+test.describe("Smart Humanization", () => {
+  test("on: pasted text is checked and humanized automatically, and the copy is typed exactly; off: the exact original", async ({ page, context }) => {
+    const { ROBOTIC, ROBOTIC_HUMANIZED, NATURAL } = await import("../src/humanize/fixtures");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await setDuration(page, 0, 4);
+    const toggle = page.getByRole("switch", { name: /Smart Humanization/ });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    // A real paste into the editor: no button to press, no dialog.
+    await page.evaluate((t) => navigator.clipboard.writeText(t), ROBOTIC);
+    await page.getByTestId("editor").focus();
+    await page.keyboard.press("ControlOrMeta+V");
+    await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
+    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByText("Details", { exact: true }).click();
+    await expect(page.getByTestId("humanize-output")).toHaveValue(ROBOTIC_HUMANIZED);
+    await expect(page.getByTestId("humanize-original")).toHaveValue(ROBOTIC);
+
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(ROBOTIC_HUMANIZED);
+    await expect(page.getByTestId("verified-badge")).toBeVisible();
+    // The editor still holds the untouched original.
+    await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
+
+    // Type the original instead, without turning the feature off.
+    await page.getByTestId("humanize-restore").click();
+    await expect(page.getByTestId("humanize-headline")).toHaveText("Typing your original");
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(ROBOTIC);
+
+    // Natural writing scores below 50% and is left alone.
+    await setText(page, NATURAL);
+    await expect(page.getByTestId("humanize-headline")).toHaveText("No changes needed");
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(NATURAL);
+
+    // Off: exact-source typing, and the setting survives a reload.
+    await setText(page, ROBOTIC);
+    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
+    await page.reload();
+    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+    await setText(page, ROBOTIC);
+    await expect(page.getByTestId("humanize-status")).toHaveCount(0);
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(ROBOTIC);
+  });
+
+  test("the switch is locked while typing, so the text never changes mid-session", async ({ page }) => {
+    const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("../src/humanize/fixtures");
+    await setDuration(page, 0, 6);
+    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+    await setText(page, ROBOTIC);
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Typing");
+    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toBeDisabled();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(ROBOTIC_HUMANIZED);
+    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toBeEnabled();
+  });
+});

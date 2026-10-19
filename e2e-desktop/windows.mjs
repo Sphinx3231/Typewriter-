@@ -23,6 +23,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** The Smart Humanization sample texts, read from the unit-test fixtures so both suites check the same strings. */
+const FIXTURES = Object.fromEntries(
+  [...readFileSync(join(here, "..", "src", "humanize", "fixtures.ts"), "utf8").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
+);
 const APP = resolve(process.argv[2] ?? join(here, "../src-tauri/target/release/typewriter.exe"));
 const SHOTS = process.env.SHOTS ? resolve(process.env.SHOTS) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -153,6 +157,11 @@ const UI = `
       return document.getElementById(l.htmlFor);
     },
     click(testid) { document.querySelector('[data-testid="' + testid + '"]').click(); },
+    switchByLabel(text, on) {
+      const l = [...document.querySelectorAll("label")].find((x) => x.textContent.trim() === text);
+      const sw = document.getElementById(l.htmlFor);
+      if ((sw.getAttribute("aria-checked") === "true") !== on) sw.click();
+    },
     has(testid) { const b = document.querySelector('[data-testid="' + testid + '"]'); return !!b && !b.disabled; },
     state() {
       const q = (t) => document.querySelector('[data-testid="' + t + '"]');
@@ -716,6 +725,29 @@ async function main() {
     hudPixels("win-hud-completed");
     const got = read("doc");
     assert(got === TRICKY, `final text differs.\n    want ${JSON.stringify(TRICKY)}\n    got  ${JSON.stringify(got)}`);
+  });
+
+  await check("Smart Humanization on: the humanized copy is typed exactly; off: the exact original", async () => {
+    const { ROBOTIC, ROBOTIC_HUMANIZED } = FIXTURES;
+    assert(ROBOTIC && ROBOTIC_HUMANIZED, "fixtures not found");
+    const run = async () => {
+      await clear("doc");
+      await start();
+      await clickInto("doc");
+      await until(async () => (await hudPhase()) === "completed", 90000, "the session to complete");
+      await sleep(500);
+      return read("doc");
+    };
+    await configure(ROBOTIC, { seconds: 12, mistakes: "Medium" });
+    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+    await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+    let got = await run();
+    assert(got === ROBOTIC_HUMANIZED, `humanized copy differs.\n    want ${JSON.stringify(ROBOTIC_HUMANIZED)}\n    got  ${JSON.stringify(got)}`);
+    await ensureIdle();
+    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await sleep(300);
+    got = await run();
+    assert(got === ROBOTIC, `original differs.\n    want ${JSON.stringify(ROBOTIC)}\n    got  ${JSON.stringify(got)}`);
   });
 
   await check("pause and resume from the status window, then finishes exactly", async () => {

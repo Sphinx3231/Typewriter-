@@ -1,11 +1,32 @@
 # Status
 
-_Last updated: 2026-10-18 (1.2.0 on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-19 (1.2.0 + Smart Humanization on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)
+
+An opt-in exception to "the text is untouchable", approved by the owner (CLAUDE.md rule 3, SPEC §2a). Off by default. Owner decisions: opt-in only; local rules, no AI.
+
+- **What it does.** When it's on, text you type or paste is checked against 8 style checks as soon as the editor settles (the same moment the estimate updates). Score = flagged applicable checks ÷ applicable checks × 100. At ≥ 50% (50% included), a rule-based rewrite prepares a copy and that copy is typed, with no approval step. Below 50%, too short (< 40 words or < 2 sentences), no applicable checks, or no safe edit: your text is typed as written.
+- **Integrity.** The editor text is the original and is never changed. The copy is always derived from the original, never from an earlier copy. Quotations, citations, brackets, links, code, numbers, line breaks and edge whitespace are protected, and a safety check compares them; any difference, or any error, types the original and shows "Couldn't humanize" with the reason. The switch, tone and version choice are locked during a session. Any edit re-checks the text and clears a "type my original" choice.
+- **Honesty.** The UI and docs call the score a writing-style heuristic. It does not detect AI authorship.
+- **Code.** `src/humanize/` (checks, score, rewrite, safety check), `src/state/useSession.ts` (what gets typed), `src/ui/HumanizeStatus.tsx`, the switch in `src/ui/SettingsPanel.tsx`.
+
+**Tests (run 2026-10-19 in this container):**
+- Lint/typecheck: clean. Unit + integration (Vitest): **748 passed**, coverage 99.73% statements, 98.78% branches, 99.82% functions, 100% lines.
+  - Engine: threshold below, exactly 50% (4/8 and 1/2) and above; no applicable checks; empty/short text; no safe edit; the real essay with its exact output and edit list; protected spans; Unicode/CRLF/edge whitespace; case; safety-check fallback; checklist-crash fallback.
+  - Session hook: off types the original exactly; on, pasted text is humanized with no approval and the preview output equals the copy exactly; below 50% and short text unchanged; on → off restores exact-source typing; type original / type humanized; re-checks always run on the original (never on a copy); tone change; very long text and a start before the check settled; no change mid-session (playing and paused); stop then toggle; checklist failure types the original; corrupt saved settings repaired; desktop bridge receives the copy and its key events replay to exactly the copy.
+  - UI: every status (checking, humanized, using original, no changes needed, no changes made, too short, failed), details, buttons and the locked state; the settings switch and tone; the editor subtitle.
+- Browser (Playwright, real Chromium): **29 passed**, including a real Ctrl+V paste → "Humanized automatically" → output equals the copy exactly; type original; natural text unchanged; setting survives reload; off → exact original; switch locked while typing. This test found a bug (fixed): after "Type my original", editing and then pasting the same text again revived the old choice.
+- Native (Rust): all suites pass (no changes there).
+- Linux desktop E2E (packaged app, Xvfb + openbox, real Chromium window): **25/25**, including the new check: on, with typos Medium, the document gets the humanized copy exactly; off, the exact original.
+- Windows desktop E2E: the same check was added to `e2e-desktop/windows.mjs`. Result: see the board / next update.
+
+**Not verified:** your PC; how well the edits read to a human (that's a judgement, not a test); languages other than English (the checks and rules are English-only; other text will usually score low and be left alone).
 
 ## 1.2.0: closing, tab switching, the countdown, packaging (2026-10-18, not merged)
 

@@ -572,6 +572,13 @@ describe("useSession: Smart Humanization", () => {
     expect(result.current.humanize.usingOriginal).toBe(false);
     expect(result.current.humanize.result!.source).toBe(edited);
     expect(result.current.humanize.prepared).toBe(ROBOTIC_HUMANIZED + " Schools use tablets.");
+
+    // Editing away and back again is a new text: the earlier choice doesn't come back.
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.humanize.typeOriginal());
+    act(() => result.current.setText(NATURAL));
+    act(() => result.current.setText(ROBOTIC));
+    expect(result.current.humanize).toMatchObject({ usingOriginal: false, prepared: ROBOTIC_HUMANIZED });
   });
 
   it("re-checks when the text or tone changes, always from the original, never from its own output", () => {

@@ -13,13 +13,17 @@
  * Needs: Xvfb, openbox, xdotool, tauri-driver, WebKitWebDriver (Linux).
  */
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** The Smart Humanization sample texts, read from the unit-test fixtures so both suites check the same strings. */
+const FIXTURES = Object.fromEntries(
+  [...readFileSync(join(here, "..", "src", "humanize", "fixtures.ts"), "utf8").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
+);
 const APP = resolve(process.argv[2] ?? join(here, "../src-tauri/target/release/typewriter"));
 const DISPLAY = ":99";
 const env = { ...process.env, DISPLAY, XDG_SESSION_TYPE: "x11", GDK_BACKEND: "x11", HOME: mkdtempSync(join(tmpdir(), "tw-home-")) };
@@ -431,6 +435,32 @@ async function main() {
     xdo("windowactivate", "--sync", await mainWindow());
     await sleep(500);
     shot("desktop-verified");
+  });
+
+  await check("Smart Humanization on: the humanized copy is typed exactly (typos on); off: the exact original", async () => {
+    const { ROBOTIC, ROBOTIC_HUMANIZED } = FIXTURES;
+    assert(ROBOTIC && ROBOTIC_HUMANIZED, "fixtures not found");
+    const run = async () => {
+      await resetDoc();
+      await ui(`(__tw.click("btn-start"), 1)`);
+      await sleep(300);
+      await focusDoc();
+      await until(async () => (await state()).status === "Sent", 40000, "completion");
+      return docValue();
+    };
+    await prepare(ROBOTIC, { seconds: 12, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+    await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+    let got = await run();
+    assert(got === ROBOTIC_HUMANIZED, `humanized copy differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(ROBOTIC_HUMANIZED)}`);
+    const kept = await ui(`document.getElementById("source-text").value`);
+    assert(kept === ROBOTIC, "the original in the editor changed");
+
+    await ensureIdle();
+    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await sleep(300);
+    got = await run();
+    assert(got === ROBOTIC, `original differs:\n${JSON.stringify(got)}`);
   });
 
   await check("Caps Lock left on doesn't change the case of what's typed", async () => {
