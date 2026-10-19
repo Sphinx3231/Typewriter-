@@ -20,9 +20,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
-/** The Smart Humanization sample texts, read from the unit-test fixtures so both suites check the same strings. */
+/** The Smart Humanization sample texts, read from the unit-test fixtures so both suites check the same strings (LF line endings, as in the repository; a Windows checkout may have CRLF). */
 const FIXTURES = Object.fromEntries(
-  [...readFileSync(join(here, "..", "src", "humanize", "fixtures.ts"), "utf8").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
+  [...readFileSync(join(here, "..", "src", "humanize", "fixtures.ts"), "utf8").replace(/\r\n/g, "\n").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
 );
 const APP = resolve(process.argv[2] ?? join(here, "../src-tauri/target/release/typewriter"));
 const DISPLAY = ":99";
