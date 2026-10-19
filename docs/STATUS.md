@@ -24,7 +24,7 @@ An opt-in exception to "the text is untouchable", approved by the owner (CLAUDE.
 - Browser (Playwright, real Chromium): **29 passed**, including a real Ctrl+V paste → "Humanized automatically" → output equals the copy exactly; type original; natural text unchanged; setting survives reload; off → exact original; switch locked while typing. This test found a bug (fixed): after "Type my original", editing and then pasting the same text again revived the old choice.
 - Native (Rust): all suites pass (no changes there).
 - Linux desktop E2E (packaged app, Xvfb + openbox, real Chromium window): **25/25**, including the new check: on, with typos Medium, the document gets the humanized copy exactly; off, the exact original.
-- Windows desktop E2E: the same check was added to `e2e-desktop/windows.mjs`. Result: see the board / next update.
+- Windows desktop E2E (GitHub `windows-2022`, the installed NSIS app), run 31 (`61b9dde`): **15/15 run checks passed**, including the new one: humanize on with typos Medium types the humanized copy exactly into a real window; off types the exact original. Run 30 failed that check only because the harness read the fixtures from a CRLF checkout; the document text was already correct, and the harness now normalizes line endings. In both runs Opera's best-effort install failed, so the three Opera checks were **skipped** (Notepad-only in the three-target test). macOS and Linux builds: success. No release was published.
 
 **Not verified:** your PC; how well the edits read to a human (that's a judgement, not a test); languages other than English (the checks and rules are English-only; other text will usually score low and be left alone).
 
