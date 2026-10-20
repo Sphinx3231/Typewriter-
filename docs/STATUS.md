@@ -67,7 +67,10 @@ Tests run in this container for this pass:
 - Browser (Playwright, real Chromium, production build): **43 passed**, 0 failed (11 new layout tests, 390–1920 px).
 - Native (Rust): 9 + 38 + 32 + 3 + 15 passed, 0 failed.
 - Linux desktop E2E (packaged app, Xvfb): **25 passed**, 0 failed; the Studio check now also measures the side-by-side layout in the real webview, at 1360 px and at 1050 px.
-- Windows desktop E2E (GitHub `windows-2022`, the installed app), run 33 on `44cf88f`: **17 of 18 passed**: Notepad, a plain text field in Opera, a Google-Docs-like page in Opera, Chrome and Edge (stand-ins, not Google Docs), the extension in Opera, tab switching, pause/stop, closing. **Failed:** the Smart Humanization check, at its new layout assertion (issue 3 above), before it reached typing. The fix is not yet run on Windows.
+- Windows desktop E2E (GitHub `windows-2022`, the installed app, 1028 px window):
+  - Run 33 on `44cf88f`: **17 of 18 passed**. Failed: the Smart Humanization check at its new layout assertion (issue 3 above, columns 161 + 161 px), before it reached typing.
+  - Run 34 on `4d5e2ed` (the fix), attempt 1: 17 of 18. The Studio check passed (side by side, columns 343 + 343 px, no overflow; humanized copy, kept-original mix and original all typed exactly). Failed: "the Chrome extension in Opera" (Opera's DevTools didn't answer), the same unrelated failure as run 32 attempt 1; this branch does not touch the extension.
+  - Run 34 attempt 2, a single re-run of that job: **18 of 18 passed**, including Notepad, a plain text field in Opera and a Google-Docs-like page in Opera, Chrome and Edge (stand-ins, not Google Docs), each exact. The macOS, Linux and Windows builds succeeded. No release was published.
 - Not verified: real Google Docs, and the owner's own PC.
 
 ## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)
