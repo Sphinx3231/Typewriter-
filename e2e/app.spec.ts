@@ -617,6 +617,46 @@ test.describe("Humanization Studio", () => {
     expect(db).toBeLessThan(100); // orange
   });
 
+  for (const [width, together] of [
+    [1920, true],
+    [1440, true],
+    [1280, true],
+    [1100, true],
+    [900, true],
+    [390, false],
+  ] as const) {
+    test(`layout at ${width}px: side by side ${together ? "shows both texts next to each other" : "stacks them"}, no horizontal overflow`, async ({ browser }) => {
+      const { ROBOTIC } = await import("../src/humanize/fixtures");
+      const page = await browser.newPage({ viewport: { width, height: 1000 } });
+      await page.goto("/");
+      await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+      await setText(page, ROBOTIC);
+      await page.getByTestId("humanize-review").click();
+      await expect(page.getByTestId("studio")).toBeFocused();
+      await expect(page.getByTestId("studio")).toBeInViewport();
+      await page.getByTestId("studio-next").click();
+      await page.getByRole("radio", { name: /Side by side/ }).click();
+      const m = await page.evaluate(() => {
+        const studio = document.querySelector('[data-testid="studio"]')!.getBoundingClientRect();
+        const cols = [...document.querySelectorAll(".studio__col")].map((c) => c.getBoundingClientRect());
+        return {
+          sameRow: Math.abs(cols[0].top - cols[1].top) < 2,
+          inside: cols.every((c) => c.left >= studio.left - 0.5 && c.right <= studio.right + 0.5),
+          minCol: Math.min(...cols.map((c) => c.width)),
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          selected: [...document.querySelectorAll('[data-testid="studio"] .is-selected')].map((e) => (e as HTMLElement).dataset.change),
+        };
+      });
+      expect(m.sameRow).toBe(together);
+      expect(m.inside).toBe(true);
+      expect(m.overflow).toBe(0);
+      if (together) expect(m.minCol).toBeGreaterThan(200);
+      // The selected change stays selected in both texts.
+      expect(m.selected).toEqual(["0", "0"]);
+      await page.close();
+    });
+  }
+
   test("a long document stays responsive with the Studio open", async ({ page }) => {
     const { ROBOTIC } = await import("../src/humanize/fixtures");
     await page.getByRole("switch", { name: /Smart Humanization/ }).click();

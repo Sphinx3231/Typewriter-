@@ -451,6 +451,34 @@ async function main() {
     await prepare(ROBOTIC, { seconds: 12, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
     await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
     await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+
+    // The Studio's side-by-side view in this webview: both texts next to each other (stacked only
+    // below 640 px), inside the panel, and no horizontal scrolling.
+    const view = (name) => ui(`([...document.querySelectorAll('[data-testid="studio"] [role="radio"]')].find((x) => x.textContent.trim() === "${name}").click(), 1)`);
+    await view("Side by side");
+    await sleep(400);
+    const lay = JSON.parse(
+      await ui(`JSON.stringify((() => {
+        const s = document.querySelector('[data-testid="studio"]').getBoundingClientRect();
+        const cols = [...document.querySelectorAll(".studio__col")].map((c) => c.getBoundingClientRect());
+        return {
+          width: innerWidth,
+          widths: cols.map((c) => Math.round(c.width)),
+          sameRow: cols.length === 2 && Math.abs(cols[0].top - cols[1].top) < 2,
+          inside: cols.every((c) => c.left >= s.left - 0.5 && c.right <= s.right + 0.5),
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      })())`),
+    );
+    console.log(`    side by side in a ${lay.width}px window: ${lay.sameRow ? "next to each other" : "stacked"}, columns ${lay.widths.join(" + ")} px, overflow ${lay.overflow} px`);
+    assert(lay.widths.length === 2 && lay.sameRow === lay.width > 640, `side by side layout wrong: ${JSON.stringify(lay)}`);
+    assert(lay.inside && lay.overflow <= 0, `the Studio overflows: ${JSON.stringify(lay)}`);
+    if (lay.sameRow) assert(Math.min(...lay.widths) > 200, `columns too narrow: ${JSON.stringify(lay)}`);
+    await ui(`(document.querySelector('[data-testid="studio"]').scrollIntoView({ block: "start" }), 1)`);
+    await sleep(300);
+    shot("desktop-studio-side-by-side");
+    await view("Final text");
+    await sleep(200);
     let got = await run();
     assert(got === ROBOTIC_HUMANIZED, `humanized copy differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(ROBOTIC_HUMANIZED)}`);
     const kept = await ui(`document.getElementById("source-text").value`);

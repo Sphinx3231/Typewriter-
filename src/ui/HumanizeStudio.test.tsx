@@ -7,13 +7,18 @@ import { diffText } from "../humanize/diff";
 import { NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "../humanize/fixtures";
 import { useSession, type Session } from "../state/useSession";
 import { HumanizeStatus } from "./HumanizeStatus";
-import { HumanizeStudio } from "./HumanizeStudio";
+import { HumanizeStudio, StudioPanel } from "./HumanizeStudio";
 
 const FAST = { timingMode: "speed", wpm: 400, rhythm: false, pauses: false, mistakes: "off", sound: false };
 let latest: Session;
 function Live() {
   latest = useSession();
-  return <HumanizeStatus session={latest} />;
+  return (
+    <>
+      <HumanizeStatus session={latest} />
+      <StudioPanel session={latest} />
+    </>
+  );
 }
 function setup(text = ROBOTIC) {
   localStorage.setItem("typewriter:settings", JSON.stringify(FAST));

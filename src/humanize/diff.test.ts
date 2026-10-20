@@ -158,6 +158,49 @@ describe("diffText", () => {
     expect(many.changes.length).toBeGreaterThan(0);
   });
 
+  it("a long single-paragraph text is still diffed word by word, not as one whole-text change", () => {
+    // Regression: 3000 edited sentences on one line exceeded the word-level limit and the whole
+    // text showed up as a single replaced change. Now it is split into sentences first.
+    const r = humanize("Moreover, we utilize it in order to learn. ".repeat(3000));
+    expect(r.status).toBe("humanized");
+    const t0 = performance.now();
+    const d = diffText(r.source, r.output);
+    const ms = performance.now() - t0;
+    rebuilds(d);
+    expect(d.changes.length).toBe(8999);
+    expect(Math.max(...d.changes.map((c) => c.before.length + c.after.length))).toBeLessThan(20);
+    expect(pairs(d).slice(0, 3)).toEqual([
+      ["utilize", "use", "replaced"],
+      ["in order ", "", "removed"],
+      ["Moreover, we", "We", "replaced"],
+    ]);
+    expect(ms).toBeLessThan(3000);
+    // The same with Unicode, emoji and curly quotes in every sentence.
+    const u = humanize(Array.from({ length: 1500 }, (_, i) => `Moreover, café 🎉 users utilize “it” in order to learn ${i}. `).join(""));
+    const du = diffText(u.source, u.output);
+    rebuilds(du);
+    expect(du.changes.length).toBeGreaterThan(4000);
+    expect(du.changes.every((c) => !c.before.includes("🎉") && !c.after.includes("café"))).toBe(true);
+  });
+
+  it("aligns sentences first when one was added or removed, then diffs the changed ones", () => {
+    const rewritten = (i: number) => `Entirely different words here number ${i} with several extra tokens added. `;
+    const kept = (i: number) => `Sentence ${i} stays exactly the same. `;
+    const orig = Array.from({ length: 450 }, (_, i) => (i % 3 === 1 ? `Original wording of line ${i} quite unlike the other one. ` : kept(i))).join("");
+    const same = Array.from({ length: 450 }, (_, i) => (i % 3 === 1 ? rewritten(i) : kept(i))).join("");
+    for (const rev of [same, same + "One more sentence. "]) {
+      const d = diffText(orig, rev);
+      rebuilds(d);
+      // Each rewritten sentence is its own change(s); unchanged sentences stay unchanged.
+      expect(d.changes.length).toBeGreaterThanOrEqual(150);
+      expect(d.changes.every((c) => !c.before.includes("stays exactly") && c.before.length < 80)).toBe(true);
+    }
+    // No sentence in common and different counts: an exact, coarse answer.
+    const none = diffText(Array.from({ length: 400 }, (_, i) => rewritten(i)).join(""), Array.from({ length: 401 }, (_, i) => kept(i)).join(""));
+    rebuilds(none);
+    expect(none.changes.length).toBe(1);
+  });
+
   it("random edits always rebuild both texts exactly (property check)", () => {
     let seed = 42;
     const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), seed % n);

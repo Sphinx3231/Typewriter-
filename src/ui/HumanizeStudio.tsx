@@ -97,6 +97,17 @@ function context(text: string, from: number, to: number): [string, string] {
   return [left.replace(/\s+/g, " "), right.replace(/\s+/g, " ")];
 }
 
+/** The Studio is shown once the latest text was checked and humanized. */
+export function studioVisible(session: Session): boolean {
+  const h = session.humanize;
+  return h.enabled && !session.blank && !h.checking && h.result?.status === "humanized" && !!h.diff;
+}
+
+/** The Studio as its own workspace panel (spanning both text columns), or nothing. */
+export function StudioPanel({ session }: { session: Session }) {
+  return studioVisible(session) ? <HumanizeStudio session={session} /> : null;
+}
+
 export function HumanizeStudio({ session }: { session: Session }) {
   const h = session.humanize;
   const d = h.diff!;
@@ -237,7 +248,7 @@ export function HumanizeStudio({ session }: { session: Session }) {
   );
 
   return (
-    <section className="studio" aria-labelledby="studio-title" data-testid="studio" onKeyDown={onKey}>
+    <section className="panel studio" id="studio" tabIndex={-1} aria-labelledby="studio-title" data-testid="studio" onKeyDown={onKey}>
       <header className="studio__head">
         <h3 className="studio__title" id="studio-title">
           <ScanText size={15} aria-hidden="true" /> Humanization Studio

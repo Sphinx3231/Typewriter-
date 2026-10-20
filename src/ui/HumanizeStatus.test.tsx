@@ -7,6 +7,7 @@ import { diffText } from "../humanize/diff";
 import { NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "../humanize/fixtures";
 import type { Session } from "../state/useSession";
 import { HumanizeStatus } from "./HumanizeStatus";
+import { StudioPanel } from "./HumanizeStudio";
 
 afterEach(cleanup);
 
@@ -32,7 +33,14 @@ function show(over: Partial<H> = {}, text = ROBOTIC) {
     rerun: vi.fn(() => true),
     ...over,
   } as H;
-  render(<HumanizeStatus session={{ humanize: h, blank: !text.trim() } as unknown as Session} />);
+  const session = { humanize: h, blank: !text.trim() } as unknown as Session;
+  // As in the app: the status line under the editor, the Studio as its own panel.
+  render(
+    <>
+      <HumanizeStatus session={session} />
+      <StudioPanel session={session} />
+    </>,
+  );
   return h;
 }
 const headline = () => screen.getByTestId("humanize-headline").textContent;
@@ -77,6 +85,27 @@ describe("HumanizeStatus", () => {
 
     await userEvent.click(screen.getByTestId("humanize-restore"));
     expect(h.typeOriginal).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Studio is its own panel, not inside the status line; 'Review the changes' takes you there", async () => {
+    show();
+    const status = screen.getByTestId("humanize-status");
+    const studio = screen.getByTestId("studio");
+    expect(status.contains(studio)).toBe(false);
+    expect(studio.className).toContain("panel");
+    const scroll = vi.fn();
+    studio.scrollIntoView = scroll;
+    await userEvent.click(screen.getByTestId("humanize-review"));
+    expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "smooth" });
+    expect(document.activeElement).toBe(studio);
+    cleanup();
+    // No Studio (nothing changed, still checking, off): no button.
+    show({}, NATURAL);
+    expect(screen.queryByTestId("humanize-review")).toBeNull();
+    cleanup();
+    show({ checking: true });
+    expect(screen.queryByTestId("humanize-review")).toBeNull();
+    expect(screen.queryByTestId("studio")).toBeNull();
   });
 
   it("names a single change in the singular; without a diff it counts the recorded edits", () => {

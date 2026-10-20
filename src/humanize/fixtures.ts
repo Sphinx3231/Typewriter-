@@ -12,3 +12,10 @@ Schools start new programs every year (Smith, 2021). Various studies show a wide
 Technology plays a crucial role in education and will continue to shape how 30 million students learn.`;
 
 export const NATURAL = `My grandmother kept bees behind the shed for forty years. She never wore gloves, which terrified me as a kid. Every August we'd spin the frames by hand in her kitchen, and the whole house smelled like wax for a week. I still can't eat store-bought honey without thinking it tastes thin. Last spring I finally set up two hives of my own.`;
+
+/**
+ * Scores exactly 50% on the real checklist with the casual tone (4 of 8 checks flagged:
+ * transitions, generic intro, formal phrasing, tone), and 3 of 8 without its formal phrasing.
+ */
+export const AT_THRESHOLD = `In today's fast-paced world, bees matter. Moreover, my grandmother kept bees. Furthermore, she utilized no gloves in order to work. ${NATURAL}`;
+export const BELOW_THRESHOLD = `Moreover, my grandmother kept bees. Furthermore, she utilized no gloves in order to work. ${NATURAL}`;

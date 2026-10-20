@@ -1,8 +1,9 @@
-import { AlertTriangle, Check, LoaderCircle, Minus, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowDown, Check, LoaderCircle, Minus, Sparkles } from "lucide-react";
 import type { HumanizeResult } from "../humanize";
 import type { TextDiff } from "../humanize/diff";
 import type { Session } from "../state/useSession";
-import { HumanizeStudio } from "./HumanizeStudio";
+import { Button } from "./controls";
+import { studioVisible } from "./HumanizeStudio";
 
 /** One line: what Smart Humanization decided for the current text. */
 function headline(
@@ -47,7 +48,22 @@ export function HumanizeStatus({ session }: { session: Session }) {
         <strong data-testid="humanize-headline">{line.text}</strong>
         {line.detail ? <span className="humanize__detail">{line.detail}</span> : null}
       </p>
-      {ready && r.status === "humanized" && h.diff ? <HumanizeStudio session={session} /> : null}
+      {studioVisible(session) ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<ArrowDown size={14} />}
+          className="humanize__jump"
+          onClick={() => {
+            const el = document.getElementById("studio");
+            el?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+            el?.focus({ preventScroll: true });
+          }}
+          data-testid="humanize-review"
+        >
+          Review the changes
+        </Button>
+      ) : null}
       {ready && r.status !== "too-short" ? (
         <details className="humanize__more">
           <summary>Style checks</summary>

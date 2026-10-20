@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, type PlaybackSettings } from "../engine";
 import { TypedBuffer } from "../engine/buffer";
 import type { Step } from "../engine/script";
 import type { Tone } from "../humanize";
-import { NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "../humanize/fixtures";
+import { AT_THRESHOLD, NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "../humanize/fixtures";
 import type { Host } from "../platform";
 import { DEFAULT_PREFS, useSession, type HistoryEntry } from "./useSession";
 
@@ -794,5 +794,71 @@ describe("useSession: Smart Humanization", () => {
     act(() => void result.current.start());
     await flush();
     expect(f.bridge.start.mock.calls[1][3]).toBe(ROBOTIC);
+  });
+
+  it("at exactly 50% on the real checklist, the rewrite is what is typed", () => {
+    const { result } = setup();
+    on(result);
+    act(() => void result.current.humanize.setTone("casual"));
+    act(() => result.current.setText(AT_THRESHOLD));
+    const r = result.current.humanize.result!;
+    expect(r).toMatchObject({ status: "humanized", score: 50 });
+    expect(result.current.humanize.prepared).toBe(r.output);
+    expect(typeIt(result)).toBe(r.output);
+    expect(result.current.text).toBe(AT_THRESHOLD);
+  });
+
+  it("off, or on with nothing to change: Unicode, emoji, CRLF, tabs and spacing are typed exactly", () => {
+    const tricky = "Café 👍🏽 naïve “quotes” — 日本語 e\u0301\r\n\tTwo  spaces,\u00a0no-break; ellipsis… «fin»\n\n\nLast line ";
+    const { result } = setup();
+    act(() => result.current.setText(tricky));
+    expect(result.current.humanize.prepared).toBe(tricky);
+    expect(typeIt(result)).toBe(tricky);
+    on(result);
+    // Too short to check: typed exactly. Long and natural: typed exactly.
+    expect(result.current.humanize.result).toMatchObject({ status: "too-short" });
+    expect(typeIt(result)).toBe(tricky);
+    const longer = `${tricky}\r\n${NATURAL.replaceAll("\n", "\r\n")}`;
+    act(() => result.current.setText(longer));
+    expect(result.current.humanize.result).toMatchObject({ status: "no-change-needed" });
+    expect(result.current.humanize.diff).toBeNull();
+    expect(typeIt(result)).toBe(longer);
+  });
+
+  it("empty or blank input: nothing to check, nothing replaced, no Studio", () => {
+    const { result } = setup();
+    on(result);
+    for (const blank of ["", "   ", "\n\n\t"]) {
+      act(() => result.current.setText(blank));
+      expect(result.current.humanize.result).toMatchObject({ status: "too-short", output: blank });
+      expect(result.current.humanize.prepared).toBe(blank);
+      expect(result.current.humanize.diff).toBeNull();
+      let ok = true;
+      act(() => void (ok = result.current.humanize.setChangeReverted(0, true)));
+      expect(ok).toBe(false);
+    }
+  });
+
+  it("a change put back in the Studio reaches the other app exactly, as plain text with no highlight markup", async () => {
+    const f = fakeBridge();
+    env.bridge = f.bridge;
+    const { result } = setup("desktop");
+    await flush();
+    act(() => result.current.setDestination("external"));
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    const util = result.current.humanize.diff!.changes.find((c) => c.before === "utilize")!;
+    act(() => void result.current.humanize.setChangeReverted(util.id, true));
+    const mixed = ROBOTIC_HUMANIZED.replace("students use", "students utilize");
+    act(() => void result.current.start());
+    await flush();
+    const [events, , , source] = f.bridge.start.mock.calls[0];
+    expect(source).toBe(mixed);
+    const replay = new TypedBuffer();
+    for (const e of events as Step[]) replay.apply(e);
+    expect(replay.text()).toBe(mixed);
+    expect(replay.text()).not.toMatch(/[<>−]|mark|data-/);
+    // The original in the editor is untouched.
+    expect(result.current.text).toBe(ROBOTIC);
   });
 });

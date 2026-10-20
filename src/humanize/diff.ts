@@ -199,8 +199,12 @@ function slide(p: Piece[]) {
   }
 }
 
-/** Diff two token lists; a difference too large for MAX_D becomes one replacement. */
-function diffTokens(a: string[], b: string[], out: Piece[]) {
+/**
+ * Diff two token lists. A difference too large for MAX_D (a long one-paragraph text with many
+ * small edits) is split into sentences and diffed sentence by sentence; only if that also fails
+ * does it become one replacement. Every path is exact.
+ */
+function diffTokens(a: string[], b: string[], out: Piece[], depth = 0) {
   let pre = 0;
   while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
   let suf = 0;
@@ -214,13 +218,69 @@ function diffTokens(a: string[], b: string[], out: Piece[]) {
     let i = 0;
     let j = 0;
     for (const op of ops) p.push({ op, text: op === 2 ? bm[j++] : (j += op === 0 ? 1 : 0, am[i++]) });
-  } else {
+  } else if (!(am.length && bm.length && depth < 2 && bySentence(am.join(""), bm.join(""), p, depth))) {
     if (am.length) p.push({ op: 1, text: am.join("") });
     if (bm.length) p.push({ op: 2, text: bm.join("") });
   }
   for (const text of a.slice(a.length - suf)) p.push({ op: 0, text });
   slide(p);
   out.push(...p);
+}
+
+/** Sentences (each with its trailing spaces) and lines; joined, they give back the text exactly. */
+function sentencesOf(text: string): string[] {
+  const out: string[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/[.!?…]+["'”’)\]]*\s+|\n/g)) {
+    const end = m.index + m[0].length;
+    out.push(text.slice(last, end));
+    last = end;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/**
+ * Diff sentence by sentence. The rewrite edits inside sentences, so the counts usually match and
+ * sentence i pairs with sentence i; otherwise the sentences are aligned with Myers first. Returns
+ * false (nothing pushed) when neither gives a finer answer than one whole replacement.
+ */
+function bySentence(x: string, y: string, out: Piece[], depth: number): boolean {
+  const sa = sentencesOf(x);
+  const sb = sentencesOf(y);
+  if (sa.length < 2 && sb.length < 2) return false;
+  const pair = (u: string[], w: string[]) => {
+    const s = u.join("");
+    const t = w.join("");
+    if (s === t) out.push({ op: 0, text: s });
+    else diffTokens(tokenize(s), tokenize(t), out, depth + 1);
+  };
+  if (sa.length === sb.length) {
+    for (let i = 0; i < sa.length; i++) pair([sa[i]], [sb[i]]);
+    return true;
+  }
+  const [ia, ib] = intern([sa, sb]);
+  const ops = myers(ia, ib, MAX_D);
+  if (!ops || !ops.includes(0)) return false;
+  let i = 0;
+  let j = 0;
+  let del: string[] = [];
+  let ins: string[] = [];
+  const flush = () => {
+    if (del.length || ins.length) pair(del, ins);
+    del = [];
+    ins = [];
+  };
+  for (const op of ops) {
+    if (op === 0) {
+      flush();
+      out.push({ op: 0, text: sa[i++] });
+      j++;
+    } else if (op === 1) del.push(sa[i++]);
+    else ins.push(sb[j++]);
+  }
+  flush();
+  return true;
 }
 
 const lines = (t: string) => t.match(/[^\n]*\n|[^\n]+$/g) ?? [];

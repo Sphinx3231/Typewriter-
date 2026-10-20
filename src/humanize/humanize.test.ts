@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "./fixtures";
+import { AT_THRESHOLD, BELOW_THRESHOLD, NATURAL, ROBOTIC, ROBOTIC_HUMANIZED } from "./fixtures";
 import { CHECK_LABELS, humanize, MIN_WORDS, rewrite, runChecks, safetyProblem, score, THRESHOLD, type CheckId, type CheckResult, type Engine } from ".";
 
 const ids = Object.keys(CHECK_LABELS) as CheckId[];
@@ -42,6 +42,16 @@ describe("the score", () => {
 });
 
 describe("humanize: the decision", () => {
+  it("the real checklist (not rigged): a text at exactly 50% is rewritten, one flag fewer is not", () => {
+    const at = humanize(AT_THRESHOLD, "casual");
+    expect(at).toMatchObject({ status: "humanized", score: 50, flagged: 4, applicable: 8 });
+    expect(at.output).not.toBe(AT_THRESHOLD);
+    expect(at.source).toBe(AT_THRESHOLD);
+    const below = humanize(BELOW_THRESHOLD, "casual");
+    expect(below).toMatchObject({ status: "no-change-needed", score: 38, flagged: 3, applicable: 8 });
+    expect(below.output).toBe(BELOW_THRESHOLD);
+  });
+
   it("rewrites at exactly 50%", () => {
     const r = humanize(ROBOTIC, "any", rigged(8, 4));
     expect(r).toMatchObject({ status: "humanized", score: 50, flagged: 4, applicable: 8 });

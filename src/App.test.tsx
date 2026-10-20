@@ -47,6 +47,20 @@ afterEach(() => {
 });
 
 describe("App (browser preview)", () => {
+  it("shows the Humanization Studio as its own panel next to the editor and playback, spanning both", async () => {
+    const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("./humanize/fixtures");
+    localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: true }));
+    renderApp();
+    expect(screen.queryByTestId("studio")).toBeNull();
+    typeText(ROBOTIC);
+    const studio = screen.getByTestId("studio");
+    expect(studio.parentElement!.className).toContain("workspace__texts");
+    expect(studio.closest(".editor")).toBeNull();
+    expect(editor().value).toBe(ROBOTIC);
+    fireEvent.click(screen.getByTestId("studio-highlight"));
+    expect(screen.getByTestId("studio-revised-text").textContent).toBe(ROBOTIC_HUMANIZED);
+  });
+
   it("shows the empty state and refuses to start without text", () => {
     renderApp();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workspace");

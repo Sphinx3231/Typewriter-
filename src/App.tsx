@@ -6,6 +6,7 @@ import { useTheme } from "./theme/theme";
 import { ActivityLog } from "./ui/ActivityLog";
 import { useToast } from "./ui/controls";
 import { Editor } from "./ui/Editor";
+import { StudioPanel } from "./ui/HumanizeStudio";
 import { ExternalGuide } from "./ui/ExternalPanel";
 import { HistoryView } from "./ui/HistoryView";
 import { Logo } from "./ui/Logo";
@@ -204,6 +205,7 @@ export default function App() {
                   />
                   <ActivityLog snapshot={snapshot} />
                 </section>
+                <StudioPanel session={session} />
               </div>
               <SettingsPanel session={session} />
             </div>

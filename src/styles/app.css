@@ -2003,15 +2003,21 @@ fieldset:disabled .segmented__opt {
 }
 
 /* ---- Humanization Studio: what changed, inline ---- */
+/* Its own panel under the editor and playback, spanning both, so "Side by side" has room. */
 .studio {
-  margin-top: 10px;
-  padding: 12px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  grid-column: 1 / -1;
+  min-width: 0;
   color: var(--text);
   display: grid;
   gap: 10px;
+  scroll-margin-top: 80px;
+}
+.studio:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring), var(--shadow-md);
+}
+.humanize__jump {
+  margin-top: 6px;
 }
 .studio__head {
   display: flex;
@@ -2126,7 +2132,7 @@ fieldset:disabled .segmented__opt {
   border-bottom: 2px dashed var(--text-subtle);
 }
 .studio__body {
-  max-height: min(48vh, 420px);
+  max-height: min(60vh, 560px);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -2141,7 +2147,7 @@ fieldset:disabled .segmented__opt {
 }
 .studio__split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .studio__col + .studio__col {
   border-left: 1px solid var(--border);
@@ -2369,9 +2375,13 @@ fieldset:disabled .segmented__opt {
   color: var(--text-muted);
   font-size: var(--fs-sm);
 }
-@media (max-width: 520px) {
+/* Phones: the two texts stack. */
+@media (max-width: 640px) {
   .studio__nav {
     margin-left: 0;
+  }
+  .studio__split {
+    grid-template-columns: minmax(0, 1fr);
   }
   .studio__col + .studio__col {
     border-left: 0;

@@ -14,7 +14,7 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
 - **Diff** (`src/humanize/diff.ts`):
   - a Myers word-level diff, run line by line and then word by word inside changed lines (Unicode word segmentation, so emoji, combining marks and CJK are never split);
   - small, exact clean-ups so changes read as whole words: removals slide to start at a word, a lone shared space can't split one edit, and adjacent replacements are split where they share words;
-  - a per-call limit, beyond which a block becomes one coarser but still exact change.
+  - a per-call limit; a block over it is split into sentences and diffed sentence by sentence (so a long one-paragraph text still gets word-level changes), and only if that also fails does it become one coarser but still exact change.
   - Every segment is an exact slice of the original and of the revised text, so both rebuild character for character (tested, including 300 random cases).
 - **Explanations** are matched to the rewrite's recorded edits only when the edit's text really occurs over that spot, covers the removed text, and accounts for the added words. Otherwise they say "Wording adjusted for flow".
 - **Session** (`src/state/useSession.ts`):
@@ -24,6 +24,8 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
   - re-run always checks the original;
   - nothing changes while typing.
 - **UI** (`src/ui/HumanizeStudio.tsx`, styles in `app.css`, colors in `tokens.css`):
+  - the Studio is its own full-width panel below the editor and playback panels; the status line under the editor keeps the score and offers **Review the changes**, which scrolls to the Studio and focuses it;
+  - Side by side puts the two texts next to each other above 640 px of window width and stacks them below that;
   - three views, highlights on/off, changes only (in pages of 200), previous/next with Alt+↑/↓, an explanation card, keep original wording / use revised wording, copy revised/original, restore original, re-run on original;
   - the failure status is now "Humanization unavailable … Your original text will be typed, exactly as written."
   - Highlight text and lines pass WCAG contrast checks in both themes (`contrast.test.ts`).
@@ -43,10 +45,27 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
   - The macOS and Linux builds succeeded. No release was published.
 
 **Limitations:**
-- In the app's default three-column layout the Studio sits in the editor column, so "Side by side" stacks the two texts on narrow widths.
 - Explanations exist only for the rewrite's own rules.
 - The checks and rules are English-only.
-- A diff limit means a huge, unrelated difference shows as one large change. Humanization never produces one.
+- A diff limit means a huge, unrelated difference with no sentence in common shows as one large change. Humanization never produces one.
+- Very long texts: a 129,000-character single paragraph with 9,000 changes takes about 0.6 s to diff in Node (once per check, not per keystroke).
+
+### Merge-readiness pass (2026-10-20)
+
+Issues found and fixed:
+1. **Side by side stacked in the narrow editor column.** Measured in Chromium (production build): at 1440 and 1280 px the two texts stacked, and at 1280 px the columns overflowed the panel. The Studio is now its own full-width panel; status line → **Review the changes**. Measured after: side by side at 1920/1440/1280/1100/900 px (columns 588/382/302/212/404 px), stacked at 390 px, no horizontal overflow anywhere. Packaged Linux app (WebKitGTK, 1360 px window): side by side, columns 342 + 342 px, no overflow.
+2. **A long single-paragraph text showed as one whole-text change.** The word-level diff gave up past its limit (e.g. "Moreover, we utilize it in order to learn. " × 3000, 129,000 characters, 1 change). It now falls back to a sentence-by-sentence diff first: 8,999 word-level changes, both texts rebuilt exactly.
+
+Audited with new tests (no defect found): exactly 50% on the **real** checklist (casual tone, 4 of 8 checks) is rewritten and typed, 3 of 8 is not; off, and on with nothing to change, types Unicode, emoji, combining marks, CRLF, tabs, no-break spaces and repeated blank lines exactly; empty and blank input produce no Studio and nothing to revert; a change put back in the Studio reaches the desktop engine as exactly that plain text (source and replayed key events), with no markup; a checklist failure types the original (existing test). There is no model, network call or timeout in this feature (local rules only), so "model error / timeout" reduces to the checklist-failure path.
+
+Tests run in this container for this pass:
+- Lint/typecheck: clean. Production build: OK.
+- Unit + integration (Vitest): **811 passed**, 0 failed (48 files); coverage 99.68% statements, 98.58% branches, 99.85% functions, 100% lines.
+- Browser (Playwright, real Chromium, production build): **38 passed**, 0 failed (6 new layout tests).
+- Native (Rust): 9 + 38 + 32 + 3 + 15 passed, 0 failed.
+- Linux desktop E2E (packaged app, Xvfb): **25 passed**, 0 failed; the Studio check now also measures the side-by-side layout in the real webview.
+- Windows desktop E2E (Notepad, an Opera text field, a Docs-like page in Opera, the installed app): **not run on this commit** (it needs a push). The same layout check was added to `e2e-desktop/windows.mjs`.
+- Not verified: real Google Docs, and the owner's own PC.
 
 ## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)
 
