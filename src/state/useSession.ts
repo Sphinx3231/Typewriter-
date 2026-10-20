@@ -21,6 +21,7 @@ import { currentHost } from "../platform";
 import { ExternalController } from "../desktop/external";
 import type { VerifyResult } from "../desktop/verify";
 import { humanize, type HumanizeResult, type Tone } from "../humanize";
+import { applyReverts, diffText, type TextDiff } from "../humanize/diff";
 import { readJSON, readString, removeKey, writeJSON, writeString } from "./storage";
 
 export type Destination = "preview" | "external";
@@ -173,15 +174,24 @@ export function useSession() {
   // the text to type is derived from the original every time, never from a previous rewrite.
   const humanizeOn = prefs.smartHumanize;
   const tone = prefs.humanizeTone;
-  const humanized = useMemo<HumanizeResult | null>(() => (humanizeOn ? humanize(deferredText, tone) : null), [humanizeOn, deferredText, tone]);
+  /** Bumped by "Re-run": checks the original again from scratch. */
+  const [runs, setRuns] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const humanized = useMemo<HumanizeResult | null>(() => (humanizeOn ? humanize(deferredText, tone) : null), [humanizeOn, deferredText, tone, runs]);
+  /** What changed, for the Studio (presentation only; never typed). */
+  const diff = useMemo<TextDiff | null>(() => (humanized?.status === "humanized" ? diffText(humanized.source, humanized.output) : null), [humanized]);
   /** The original the user chose to type as written while the feature is on (until the text changes). */
   const [originalFor, setOriginalFor] = useState<string | null>(null);
+  /** Changes the user put back to the original wording, for this exact result. */
+  const [reverted, setReverted] = useState<{ result: HumanizeResult; ids: number[] } | null>(null);
+  const revertedIds = useMemo(() => new Set(reverted && reverted.result === humanized ? reverted.ids : []), [reverted, humanized]);
   const prepare = useCallback(
     (src: string): string => {
       if (!humanizeOn || originalFor === src) return src;
-      return (humanized && humanized.source === src ? humanized : humanize(src, tone)).output;
+      if (humanized && humanized.source === src) return diff ? applyReverts(diff, revertedIds) : humanized.output;
+      return humanize(src, tone).output;
     },
-    [humanizeOn, originalFor, humanized, tone],
+    [humanizeOn, originalFor, humanized, diff, revertedIds, tone],
   );
   /** What a session started now would type. */
   const prepared = prepare(deferredText);
@@ -271,7 +281,9 @@ export function useSession() {
       const st = controller.getStatus();
       if (st === "playing" || st === "paused") return; // the editor is locked during playback
       setTextState(t);
-      setOriginalFor(null); // any edit is checked afresh, and a choice to type the original applies to the text it was made for
+      // Any edit is checked afresh: a choice to type the original, or to revert a change, applies to the text it was made for.
+      setOriginalFor(null);
+      setReverted(null);
     },
     [controller],
   );
@@ -360,6 +372,29 @@ export function useSession() {
     setTone: (t: Tone) => idle() && updatePrefs({ humanizeTone: t }),
     typeOriginal: () => idle() && setOriginalFor(deferredText),
     typeHumanized: () => idle() && setOriginalFor(null),
+    /** Exactly what changed between the original and the humanized copy (null unless humanized). */
+    diff,
+    /** Changes put back to the original wording; the prepared copy already reflects them. */
+    reverted: revertedIds,
+    /** Put one change back to the original wording (or undo that). Never while a session runs. */
+    setChangeReverted: (id: number, revert: boolean) => {
+      if (!idle() || !humanized || !diff || !diff.changes.some((c) => c.id === id)) return false;
+      const ids = new Set(revertedIds);
+      if (revert) ids.add(id);
+      else ids.delete(id);
+      setReverted({ result: humanized, ids: [...ids].sort((a, b) => a - b) });
+      return true;
+    },
+    /** Check the original again from scratch: clears reverts and the "type my original" choice. Never runs on a previous rewrite. */
+    rerun: () => {
+      if (!idle()) return false;
+      setOriginalFor(null);
+      setReverted(null);
+      setRuns((n) => n + 1);
+      return true;
+    },
+    /** How many times "Re-run" was used (for a short confirmation in the UI). */
+    runs,
   };
 
   return {

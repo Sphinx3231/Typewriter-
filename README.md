@@ -42,7 +42,13 @@ npm run desktop:build   # installers in src-tauri/target/release/bundle/
 - **Smart Humanization (optional, off by default).** When you turn it on in Settings, text you type or paste is checked against a writing-style checklist: repetitive wording, redundant sentences, formulaic transitions, a generic intro or conclusion, overly formal phrasing, repetitive sentence structure, vague statements, and (if you pick a tone) a tone mismatch.
   - **Score:** flagged checks out of the checks that apply. At **50% or more** it prepares a copy with small wording edits (for example "in order to" → "to", dropping "Furthermore," or "In conclusion,") and types that copy, exactly, with no approval step. Below 50% or for short text, your text is typed as written.
   - **Never changed:** quotations, citations, brackets, links, code, names, numbers and line breaks. A safety check compares the copy with your text; if anything protected differs, your original is typed instead and the reason is shown.
-  - **Your original is kept.** The editor always shows it; **Details** shows every check, every edit and both versions, and **Type my original instead** switches back. Nothing changes while a session is running.
+  - **Your original is kept.** The editor always shows it, and **Restore original** types it instead. Nothing changes while a session is running.
+  - **Humanization Studio** shows what changed, from a word-by-word comparison:
+    - three views: final text with inline highlights, side by side, and the original;
+    - a summary counted from that comparison (for example "9 changes · 26 words changed · 5 sentences adjusted");
+    - previous/next, highlights on/off, and "changes only";
+    - a short explanation for each change, based only on the edits the rewrite really made, or "Wording adjusted for flow" when that can't be established;
+    - copy either version, re-run on the original, and keep the original wording for any single change. What is typed is always exactly the text shown in "Final text".
   - **It runs on your device**, with fixed rules: no AI model and no network. The score is a writing-style heuristic. It does not, and cannot, tell who or what wrote a text.
 - **Your text isn't lost by accident.** Quitting with unsaved text, or in the middle of typing, asks first.
 - **Timing by duration or speed.** Set "finish in 3 minutes" or "type at 70 WPM"; the other value is worked out for you.

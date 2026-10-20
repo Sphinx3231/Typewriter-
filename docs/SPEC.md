@@ -85,6 +85,25 @@ When the user turns Smart Humanization on:
 - The final output must equal the prepared text exactly, character for character. Text is never changed during a running session.
 - It runs entirely on the device: no model, no network (CLAUDE.md rule 2).
 
+## 2b. Humanization Studio (added 2026-10-20)
+
+After an automatic rewrite, the Studio shows what changed. It is a presentation layer: it never edits the text it shows.
+- Changes come from a word-level diff of the original and the revised text (Myers, run line by line and then word by word), not from the rewrite marking its own edits.
+- Three synchronized views: **Final text** (the text that will be typed, changes highlighted inline), **Side by side** (original and revised), and **Original**.
+- Added or reworded text is underlined, removed text is struck through, punctuation and spacing changes are boxed, and kept-original changes have a dashed line. Colors come from the theme (light: blue and purple; dark: orange and red), and every highlight also has a text label for screen readers.
+- The summary (changes, words changed, sentences adjusted, words removed and added) is counted from the diff.
+- Selecting a change explains it. An explanation names a rule only when one of the rewrite's recorded edits really occurs over that spot in the original. Otherwise it says "Wording adjusted for flow", "Punctuation adjusted", "Spacing or line breaks adjusted" or "Capitalization adjusted".
+- Controls:
+  - highlights on/off;
+  - all text / changes only;
+  - previous / next change (also Alt+↑ / Alt+↓);
+  - copy original or revised;
+  - restore original;
+  - re-run on the original;
+  - per change, keep the original wording.
+- With changes kept as original, the prepared text is the revised text with exactly those slices of the original put back. It is still what is typed, exactly. Kept choices are cleared when the text, the tone or the result changes, and by a re-run.
+- There is no approval step. While a session runs, nothing that changes the typed text can be used; looking around and copying still work.
+
 # 3. BRAND IDENTITY AND VISUAL DIRECTION
 
 Create a recognizable, professional identity for Typewriter.

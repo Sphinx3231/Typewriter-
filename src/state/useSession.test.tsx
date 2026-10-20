@@ -681,6 +681,94 @@ describe("useSession: Smart Humanization", () => {
     expect(again.result.current.humanize).toMatchObject({ enabled: true, tone: "casual" });
   });
 
+  it("exposes the diff of what changed; reverting a change puts that wording back in exactly what is typed", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    const d = result.current.humanize.diff!;
+    expect(d.original).toBe(ROBOTIC);
+    expect(d.revised).toBe(ROBOTIC_HUMANIZED);
+    expect(d.stats.changes).toBe(9);
+    const util = d.changes.find((c) => c.before === "utilize")!;
+    let ok = false;
+    act(() => void (ok = result.current.humanize.setChangeReverted(util.id, true)));
+    expect(ok).toBe(true);
+    const mixed = ROBOTIC_HUMANIZED.replace("students use", "students utilize");
+    expect(result.current.humanize.reverted.has(util.id)).toBe(true);
+    expect(result.current.humanize.prepared).toBe(mixed);
+    // The diff itself (original vs humanized copy) doesn't change; only what is typed does.
+    expect(result.current.humanize.diff).toBe(d);
+    expect(result.current.controller.getSource()).toBe(mixed);
+    expect(typeIt(result)).toBe(mixed);
+
+    // Undo the revert.
+    act(() => void result.current.humanize.setChangeReverted(util.id, false));
+    expect(result.current.humanize.prepared).toBe(ROBOTIC_HUMANIZED);
+    // Reverting every change types the original exactly.
+    for (const c of d.changes) act(() => void result.current.humanize.setChangeReverted(c.id, true));
+    expect(result.current.humanize.prepared).toBe(ROBOTIC);
+    expect(typeIt(result)).toBe(ROBOTIC);
+    // An unknown change id is refused.
+    act(() => void (ok = result.current.humanize.setChangeReverted(999, true)));
+    expect(ok).toBe(false);
+  });
+
+  it("reverts are dropped when the text, tone or result changes, and while typing nothing can be reverted", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    const first = result.current.humanize.diff!.changes[0];
+    act(() => void result.current.humanize.setChangeReverted(first.id, true));
+    expect(result.current.humanize.reverted.size).toBe(1);
+    act(() => result.current.setText(ROBOTIC + " "));
+    expect(result.current.humanize.reverted.size).toBe(0);
+    act(() => result.current.setText(ROBOTIC));
+    act(() => void result.current.humanize.setChangeReverted(first.id, true));
+    act(() => void result.current.humanize.setTone("casual"));
+    expect(result.current.humanize.reverted.size).toBe(0);
+    expect(result.current.humanize.prepared).toBe(result.current.humanize.result!.output);
+
+    act(() => void result.current.start());
+    let ok = true;
+    act(() => void (ok = result.current.humanize.setChangeReverted(first.id, true)));
+    expect(ok).toBe(false);
+    act(() => void (ok = result.current.humanize.rerun()));
+    expect(ok).toBe(false);
+    expect(result.current.humanize.reverted.size).toBe(0);
+    act(() => void result.current.stop());
+  });
+
+  it("re-run checks the original again from scratch: clears reverts and the original choice, never runs on the rewrite", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(ROBOTIC));
+    const before = result.current.humanize.result;
+    act(() => void result.current.humanize.setChangeReverted(0, true));
+    act(() => void result.current.humanize.typeOriginal());
+    env.humanizeCalls = [];
+    let ok = false;
+    act(() => void (ok = result.current.humanize.rerun()));
+    expect(ok).toBe(true);
+    expect(result.current.humanize.runs).toBe(1);
+    expect(env.humanizeCalls).toEqual([ROBOTIC]);
+    expect(result.current.humanize.result).not.toBe(before);
+    expect(result.current.humanize.result!.output).toBe(ROBOTIC_HUMANIZED);
+    expect(result.current.humanize).toMatchObject({ usingOriginal: false, prepared: ROBOTIC_HUMANIZED });
+    expect(result.current.humanize.reverted.size).toBe(0);
+  });
+
+  it("no diff when nothing changed or the feature is off", () => {
+    const { result } = setup();
+    on(result);
+    act(() => result.current.setText(NATURAL));
+    expect(result.current.humanize.diff).toBeNull();
+    let ok = true;
+    act(() => void (ok = result.current.humanize.setChangeReverted(0, true)));
+    expect(ok).toBe(false);
+    act(() => void result.current.humanize.setEnabled(false));
+    expect(result.current.humanize.diff).toBeNull();
+  });
+
   it("sends the humanized copy, exactly, to another app", async () => {
     const f = fakeBridge();
     env.bridge = f.bridge;

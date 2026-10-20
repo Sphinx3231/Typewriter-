@@ -1,11 +1,48 @@
 # Status
 
-_Last updated: 2026-10-19 (1.2.0 + Smart Humanization on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-20 (1.2.0 + Smart Humanization + Humanization Studio on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## Humanization Studio (2026-10-20, not merged, not in the v1.2.0 release)
+
+Extends Smart Humanization (below). Automatic humanization is unchanged: no approval step, 50% threshold, the original typed exactly when off. See SPEC §2b.
+
+- **Diff** (`src/humanize/diff.ts`):
+  - a Myers word-level diff, run line by line and then word by word inside changed lines (Unicode word segmentation, so emoji, combining marks and CJK are never split);
+  - small, exact clean-ups so changes read as whole words: removals slide to start at a word, a lone shared space can't split one edit, and adjacent replacements are split where they share words;
+  - a per-call limit, beyond which a block becomes one coarser but still exact change.
+  - Every segment is an exact slice of the original and of the revised text, so both rebuild character for character (tested, including 300 random cases).
+- **Explanations** are matched to the rewrite's recorded edits only when the edit's text really occurs over that spot, covers the removed text, and accounts for the added words. Otherwise they say "Wording adjusted for flow".
+- **Session** (`src/state/useSession.ts`):
+  - the original stays immutable, and the prepared text = the revised text with any kept-original changes put back;
+  - that prepared text is the only thing loaded into the player or sent to the desktop engine;
+  - kept choices are tied to one result: they are dropped on any edit, tone change or re-run;
+  - re-run always checks the original;
+  - nothing changes while typing.
+- **UI** (`src/ui/HumanizeStudio.tsx`, styles in `app.css`, colors in `tokens.css`):
+  - three views, highlights on/off, changes only (in pages of 200), previous/next with Alt+↑/↓, an explanation card, keep original wording / use revised wording, copy revised/original, restore original, re-run on original;
+  - the failure status is now "Humanization unavailable … Your original text will be typed, exactly as written."
+  - Highlight text and lines pass WCAG contrast checks in both themes (`contrast.test.ts`).
+  - Unchanged text renders as plain text nodes, and the selection is moved in the DOM without re-rendering the text.
+
+**Tests (run 2026-10-20 in this container):**
+- Lint/typecheck: clean. Production build: OK.
+- Unit + integration (Vitest): **802 passed**; coverage 99.68% statements, 98.6% branches, 99.84% functions, 100% lines.
+  - New: diff (no change, empty, additions/removals/replacements, punctuation/spacing/case, line breaks and CRLF, repeated phrases, Unicode, the real essay, 1,440 changes in 0.1 s, fallbacks, random property test, reverts, explanations including the fallback); session (diff, revert, typed payload equals the reverted mix, revert-all types the original, reverts dropped on edit/tone, locked while typing, re-run on the original, no diff when unchanged); Studio UI (16 tests: views and sync, navigation and keyboard, explanations, revert, highlights never change the prepared text, changes only, copy and its failure, restore, re-run, locked session, long document with paging, punctuation/spacing/addition rendering); contrast for the new colors.
+- Browser (Playwright, real Chromium): **32 passed**. New: full Studio flow, ending with a per-change revert typed exactly with no markup, copy both versions, re-run, restore; both themes with real computed colors and decoration (underline vs line-through), plus screenshots; a 94,000-character document (Studio shown ≈2.3 s after the text was set, 20 steps + 2 view switches ≈1.5–1.9 s).
+- Native (Rust): all suites pass (no Rust changes).
+- Linux desktop E2E (packaged app, Xvfb): **25/25**, including: humanized copy exact (typos on); one change kept as original → exactly that mix in a real window, with no markup; off → exact original.
+- Windows desktop E2E: the same check is in `e2e-desktop/windows.mjs`. Result: see the board.
+
+**Limitations:**
+- In the app's default three-column layout the Studio sits in the editor column, so "Side by side" stacks the two texts on narrow widths.
+- Explanations exist only for the rewrite's own rules.
+- The checks and rules are English-only.
+- A diff limit means a huge, unrelated difference shows as one large change. Humanization never produces one.
 
 ## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)
 

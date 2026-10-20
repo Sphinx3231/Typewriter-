@@ -125,11 +125,12 @@ Use **Into another app** with Notepad (or a Google Doc), 20 s, typing mistakes M
 |---|---|---|
 | 2a.1 | With Smart Humanization **off** (Settings), paste a formal essay (the sample below) and type it. | The document gets exactly what you pasted. No humanization line appears under the editor. |
 | 2a.2 | Turn Smart Humanization **on**, paste the same essay again. | Within a moment the line under the editor says "Humanized automatically" with a score (for example 71%). No dialog, no button to approve. |
-| 2a.3 | Open **Details**. | Every check is listed (flagged, fine or doesn't apply), every edit (before → after), the original and the humanized copy. The note says it is a style heuristic, not a detector. |
-| 2a.4 | Type it. Then press **Check copied text** after copying the document. | The document equals the "Humanized copy" box exactly (Verified). The editor still shows your original. |
-| 2a.5 | Press **Type my original instead**, type again. | The document equals your original exactly. |
-| 2a.6 | Paste a short or casual paragraph (a few lines about your day). | "No changes needed" or "Too short to check"; it types exactly what you pasted. |
-| 2a.7 | Start a session and try the switch while typing. | The switch is disabled until the session ends. |
+| 2a.3 | Look at the **Humanization Studio** under the status line; open **Style checks**. | Changed words are highlighted in the text (underlined, struck through or boxed), with a summary like "9 changes · 26 words changed · 5 sentences adjusted". Every check is listed under Style checks, with a note that it is a style heuristic, not a detector. |
+| 2a.4 | Press the down arrow (next change) a few times, then try **Side by side**, **Original**, **Highlights**, and **All text / Changes only**. | The selected change stays selected in every view, and each one shows a short reason. Turning highlights off shows the plain text. |
+| 2a.5 | Select a change and press **Keep the original wording**. Type it, copy the document, press **Check copied text**. | Verified. The document equals the Final text view (highlights off) exactly, with that one change back to your wording. |
+| 2a.6 | Press **Restore original**, type again. | The document equals your original exactly. |
+| 2a.7 | Paste a short or casual paragraph (a few lines about your day). | "No changes needed" or "Too short to check"; it types exactly what you pasted. |
+| 2a.8 | Start a session and try the switch, **Keep the original wording** and **Re-run** while typing. | They are disabled until the session ends; the arrows and Copy still work. |
 
 Sample essay: *In today's fast-paced world, technology plays a crucial role in education. Moreover, students utilize various digital tools in order to learn more effectively. Furthermore, teachers leverage numerous platforms in order to facilitate learning for every student. Additionally, it is important to note that schools commence new programs every year (Smith, 2021). In conclusion, technology plays a crucial role in education.*
 

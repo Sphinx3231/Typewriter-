@@ -83,6 +83,17 @@
   --fix-bg: rgba(37, 99, 235, 0.16);
   --selection: rgba(124, 58, 237, 0.18);
 
+  /* Humanization Studio: added/reworded = blue + underline, removed = purple + strikethrough,
+     punctuation/spacing = amber dotted box. Never color alone. */
+  --diff-add-bg: #e3ebfd;
+  --diff-add-text: #1e3a8a;
+  --diff-add-line: #1d4ed8;
+  --diff-del-bg: #f1e9fe;
+  --diff-del-text: #5b21b6;
+  --diff-del-line: #6d28d9;
+  --diff-fmt-line: #a84d07;
+  --diff-selected: #2563eb;
+
   --progress-track: #ece9f6;
   --progress-fill: linear-gradient(90deg, #7c3aed 0%, #2563eb 100%);
 
@@ -147,6 +158,15 @@
   --typo-line: #ef4444;
   --fix-bg: rgba(249, 115, 22, 0.25);
   --selection: rgba(239, 68, 68, 0.28);
+
+  --diff-add-bg: rgba(249, 115, 22, 0.18);
+  --diff-add-text: #fdba74;
+  --diff-add-line: #fb923c;
+  --diff-del-bg: rgba(239, 68, 68, 0.16);
+  --diff-del-text: #fca5a5;
+  --diff-del-line: #f87171;
+  --diff-fmt-line: #fbbf24;
+  --diff-selected: #f97316;
 
   --progress-track: #24242b;
   --progress-fill: linear-gradient(90deg, #ef4444 0%, #f97316 100%);

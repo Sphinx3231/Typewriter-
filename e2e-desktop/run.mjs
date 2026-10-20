@@ -437,7 +437,7 @@ async function main() {
     shot("desktop-verified");
   });
 
-  await check("Smart Humanization on: the humanized copy is typed exactly (typos on); off: the exact original", async () => {
+  await check("Smart Humanization on: the humanized copy is typed exactly (typos on); with one change kept as original, exactly that mix; off: the exact original", async () => {
     const { ROBOTIC, ROBOTIC_HUMANIZED } = FIXTURES;
     assert(ROBOTIC && ROBOTIC_HUMANIZED, "fixtures not found");
     const run = async () => {
@@ -455,6 +455,17 @@ async function main() {
     assert(got === ROBOTIC_HUMANIZED, `humanized copy differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(ROBOTIC_HUMANIZED)}`);
     const kept = await ui(`document.getElementById("source-text").value`);
     assert(kept === ROBOTIC, "the original in the editor changed");
+
+    // Humanization Studio: keep the original wording for one change (2nd: "utilize" → "use"); exactly that mix is typed.
+    await ensureIdle();
+    await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), 1)`);
+    await sleep(200);
+    await ui(`(__tw.click("studio-revert"), 1)`);
+    await sleep(300);
+    const mixed = ROBOTIC_HUMANIZED.replace("students use", "students utilize");
+    got = await run();
+    assert(got === mixed, `text with one change kept as original differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(mixed)}`);
+    assert(!/[−↺]/.test(got), "highlight markup reached the document");
 
     await ensureIdle();
     await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);

@@ -84,6 +84,26 @@ describe.each([
   });
 });
 
+// Humanization Studio highlights: text inside a highlight, on every surface the Studio sits on,
+// and the underline/strikethrough/box lines as non-text marks.
+describe.each([
+  ["light", light],
+  ["dark", dark],
+])("%s theme: Studio highlights", (_name, theme) => {
+  it.each(["surface", "surface-2", "paper"])("highlighted text is readable on %s (≥ 4.5:1)", (base) => {
+    expect(ratio(theme, "diff-add-text", "diff-add-bg", base)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(theme, "diff-del-text", "diff-del-bg", base)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(theme, "text", "diff-add-bg", base)).toBeGreaterThanOrEqual(4.5);
+  });
+  it.each(["diff-add-line", "diff-del-line", "diff-fmt-line", "diff-selected"])("%s stands out from the surface (≥ 3:1)", (line) => {
+    expect(ratio(theme, line, "surface")).toBeGreaterThanOrEqual(3);
+    expect(ratio(theme, line, "surface-2")).toBeGreaterThanOrEqual(3);
+  });
+  it("added and removed use different hues from the theme's own palette", () => {
+    expect(theme["diff-add-line"]).not.toBe(theme["diff-del-line"]);
+  });
+});
+
 describe("palette identity", () => {
   it("light theme is white, purple and blue", () => {
     expect(light.surface).toBe("#ffffff");
