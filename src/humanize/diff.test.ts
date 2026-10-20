@@ -201,6 +201,71 @@ describe("diffText", () => {
     expect(none.changes.length).toBe(1);
   });
 
+  it("a 500,000-character single paragraph completes without a crash and rebuilds exactly", () => {
+    // Regression: pieces were appended with out.push(...pieces), which overflows the call stack
+    // past about 120,000 pieces ("Maximum call stack size exceeded").
+    const r = humanize("Moreover, we utilize it in order to learn. ".repeat(11_628));
+    expect(r.source.length).toBeGreaterThanOrEqual(500_000);
+    expect(r.status).toBe("humanized");
+    const d = diffText(r.source, r.output);
+    rebuilds(d);
+    expect(d.changes.length).toBe(3 * 11_628 - 1);
+    expect(Math.max(...d.changes.slice(0, 1000).map((c) => c.before.length + c.after.length))).toBeLessThan(20);
+  }, 60_000);
+
+  it("a large multi-paragraph document (800 paragraphs, 471,000 characters) completes and rebuilds exactly", () => {
+    // Regression: the same crash, reached when the line pass gives up and the whole text is diffed.
+    const r = humanize((ROBOTIC + "\n\n").repeat(800));
+    expect(r.status).toBe("humanized");
+    const d = diffText(r.source, r.output);
+    rebuilds(d);
+    expect(d.changes.length).toBe(10 * 800 - 1);
+    expect(pairs(d).slice(0, 9)).toEqual(pairs(diffText(ROBOTIC, ROBOTIC_HUMANIZED)));
+  }, 60_000);
+
+  it("two long rewritten sentences side by side don't freeze the re-split pass", () => {
+    // Regression: the re-split tried every pair of spaces and recounted words for each pair, so
+    // two 751-word replacements next to each other ran for minutes. Now bounded; still exact.
+    const s = (p: string, e: string, k: number) => Array.from({ length: 751 }, (_, i) => p + "w" + ((i * k) % 97)).join(" ") + e;
+    const o = s("", ".", 3) + " " + s("", ".", 5) + " Tail.";
+    const r = s("q", "!", 7) + " " + s("r", "!", 11) + " Tail.";
+    const t0 = performance.now();
+    const d = diffText(o, r);
+    expect(performance.now() - t0).toBeLessThan(5000);
+    rebuilds(d);
+    expect(d.changes.length).toBeGreaterThan(0);
+  });
+
+  it("stays exact on large inputs: different sentence counts, repeated phrases, completely different text", () => {
+    let seed = 11;
+    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), seed % n);
+    const vocab = Array.from({ length: 300 }, (_, i) => "w" + i.toString(36));
+    const sentence = () => Array.from({ length: 12 }, () => vocab[rnd(vocab.length)]).join(" ") + ". ";
+    const many = Array.from({ length: 900 }, sentence);
+    // A sentence dropped and every first word changed (different counts, no sentence in common).
+    const dropped = many.map((x) => "Q" + x);
+    dropped.splice(4, 1);
+    // A sentence dropped, the rest unchanged but a few edited (counts differ, most in common).
+    const fewer = many.filter((_, i) => i !== 10).map((x, i) => (i % 50 ? x : x.replace(" ", " new ")));
+    const other = Array.from({ length: 900 }, sentence);
+    for (const [a, b] of [
+      [many.join(""), dropped.join("")],
+      [many.join(""), fewer.join("")],
+      [many.join(""), other.join("")],
+      ["a. ".repeat(20_000), "a! ".repeat(20_000)],
+      ["In order to learn. ".repeat(5000), "To learn. ".repeat(5000)],
+    ]) {
+      const d = diffText(a, b);
+      rebuilds(d);
+      expect(d.changes.length).toBeGreaterThan(0);
+      expect(d.changes.every((c) => c.before !== c.after)).toBe(true);
+    }
+    // Counts differ but most sentences are shared: the edits stay small and the shared text unchanged.
+    const d = diffText(many.join(""), fewer.join(""));
+    expect(d.changes.length).toBeGreaterThan(10);
+    expect(Math.max(...d.changes.map((c) => c.before.length + c.after.length))).toBeLessThan(200);
+  }, 60_000);
+
   it("random edits always rebuild both texts exactly (property check)", () => {
     let seed = 42;
     const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), seed % n);

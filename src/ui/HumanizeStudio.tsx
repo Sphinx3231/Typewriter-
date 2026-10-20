@@ -250,9 +250,9 @@ export function HumanizeStudio({ session }: { session: Session }) {
   return (
     <section className="panel studio" id="studio" tabIndex={-1} aria-labelledby="studio-title" data-testid="studio" onKeyDown={onKey}>
       <header className="studio__head">
-        <h3 className="studio__title" id="studio-title">
+        <h2 className="studio__title" id="studio-title">
           <ScanText size={15} aria-hidden="true" /> Humanization Studio
-        </h3>
+        </h2>
         <p className="studio__summary" data-testid="studio-summary" title="Counted from a word-by-word comparison of your original and the revised text. Words changed: for each change, the larger of the words removed and the words added.">
           {plural(s.changes, "change")} · {plural(s.wordsChanged, "word")} changed · {plural(s.sentencesAdjusted, "sentence")} adjusted
           <span className="studio__sub">

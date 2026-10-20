@@ -58,6 +58,8 @@ describe("App (browser preview)", () => {
     // Reading and tab order: the text panels, then the Studio, then Settings.
     expect(studio.previousElementSibling!.className).toContain("workspace__texts");
     expect(studio.nextElementSibling!.className).toContain("settings");
+    // A top-level panel like Your text, Playback and Settings: an h2 under the page's h1.
+    expect(within(studio).getByRole("heading", { level: 2 }).textContent).toContain("Humanization Studio");
     expect(studio.closest(".editor")).toBeNull();
     expect(editor().value).toBe(ROBOTIC);
     fireEvent.click(screen.getByTestId("studio-highlight"));

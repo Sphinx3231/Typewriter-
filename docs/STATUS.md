@@ -14,7 +14,7 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
 - **Diff** (`src/humanize/diff.ts`):
   - a Myers word-level diff, run line by line and then word by word inside changed lines (Unicode word segmentation, so emoji, combining marks and CJK are never split);
   - small, exact clean-ups so changes read as whole words: removals slide to start at a word, a lone shared space can't split one edit, and adjacent replacements are split where they share words;
-  - a per-call limit; a block over it is split into sentences and diffed sentence by sentence (so a long one-paragraph text still gets word-level changes), and only if that also fails does it become one coarser but still exact change.
+  - a per-call limit; a block over it (or any block over 50,000 characters) is split into sentences and diffed sentence by sentence (so a long one-paragraph text still gets word-level changes), and only if that also fails does it become one coarser but still exact change.
   - Every segment is an exact slice of the original and of the revised text, so both rebuild character for character (tested, including 300 random cases).
 - **Explanations** are matched to the rewrite's recorded edits only when the edit's text really occurs over that spot, covers the removed text, and accounts for the added words. Otherwise they say "Wording adjusted for flow".
 - **Session** (`src/state/useSession.ts`):
@@ -47,8 +47,8 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
 **Limitations:**
 - Explanations exist only for the rewrite's own rules.
 - The checks and rules are English-only.
-- A diff limit means a huge, unrelated difference with no sentence in common shows as one large change. Humanization never produces one.
-- Very long texts: a 129,000-character single paragraph with 9,000 changes takes about 0.6 s to diff in Node (once per check, not per keystroke).
+- A diff limit means a huge difference shows as one large but exact change: when the sentence counts differ and more than 1,500 sentences changed (for example every sentence edited and one removed). Humanization doesn't add or remove sentences, so it doesn't produce this.
+- Very long texts are slow but complete: diffing a 500,000-character single paragraph takes about 2.5 s in Node, and the browser shows the Studio about 6 s after the text is set (humanizing it is part of that). Splitting text into words (`Intl.Segmenter`) is most of the time.
 
 ### Merge-readiness pass (2026-10-20)
 
@@ -69,9 +69,27 @@ Tests run in this container for this pass:
 - Linux desktop E2E (packaged app, Xvfb): **25 passed**, 0 failed; the Studio check now also measures the side-by-side layout in the real webview, at 1360 px and at 1050 px.
 - Windows desktop E2E (GitHub `windows-2022`, the installed app, 1028 px window):
   - Run 33 on `44cf88f`: **17 of 18 passed**. Failed: the Smart Humanization check at its new layout assertion (issue 3 above, columns 161 + 161 px), before it reached typing.
-  - Run 34 on `4d5e2ed` (the fix), attempt 1: 17 of 18. The Studio check passed (side by side, columns 343 + 343 px, no overflow; humanized copy, kept-original mix and original all typed exactly). Failed: "the Chrome extension in Opera" (Opera's DevTools didn't answer), the same unrelated failure as run 32 attempt 1; this branch does not touch the extension.
+  - Run 34 on `4d5e2ed` (the fix), attempt 1: 17 of 18. The Studio check passed (side by side, columns 343 + 343 px, no overflow; humanized copy, kept-original mix and original all typed exactly). Failed: "the Chrome extension in Opera" (Opera's DevTools didn't answer), the same failure as run 32 attempt 1. The merge-readiness commits do not change the extension (the branch as a whole does, compared with main: earlier commits changed `src/extension/` and its tests).
   - Run 34 attempt 2, a single re-run of that job: **18 of 18 passed**, including Notepad, a plain text field in Opera and a Google-Docs-like page in Opera, Chrome and Edge (stand-ins, not Google Docs), each exact. The macOS, Linux and Windows builds succeeded. No release was published.
 - Not verified: real Google Docs, and the owner's own PC.
+
+### Merge-blocker fixes (2026-10-20, after the final audit)
+
+The final read-only audit found blockers in the sentence-level fallback added by `44cf88f`. Fixed:
+1. **Crash on very large humanized texts.** `diffTokens` appended pieces with `out.push(...p)`, which overflows the call stack past about 120,000 pieces. Before: a 471,000-character, 800-paragraph essay made the whole app go blank in Chromium ("Maximum call stack size exceeded"); a 500,000-character single paragraph threw in Node. Now appended one at a time. The four clean-up passes after grouping also used `splice` inside loops (quadratic in the number of changes); each now rebuilds the list in one sweep.
+2. **Near-freeze in the re-split pass.** It tried every pair of spaces in two neighbouring replacements and recounted the words for each pair: a 5,857-character input (two 751-word rewritten sentences) did not finish in 45 s, against 88 ms before `44cf88f`. Now each split point's words are counted once, and edits with more than 16 spaces a side keep Myers' split (the rewrite rules never make edits that long): 140–150 ms.
+3. **Wasted work on large blocks.** A block over 50,000 characters was split into words and diffed whole (which fails past 1,500 edits, after seconds), then split into words again sentence by sentence. It now goes sentence by sentence first.
+4. **Flaky unit test.** The long-document Studio test checks an 8 s render budget but ran under the default 5 s timeout; with coverage it took 5.1–6.1 s and failed, and once a click still pending after the timeout landed in the next test. It now has an explicit 30 s timeout (about 5× the measured time) and queries only its own render.
+5. The Studio heading is an `h2` (a top-level panel, like Your text, Playback and Settings). SPEC §2b now describes the sentence-level fallback. The run 34 note no longer says the branch doesn't touch the extension (the merge-readiness commits don't; earlier commits on the branch do).
+
+Tests run in this container (2026-10-20), on the working tree:
+- New regression tests: 500,000-character single paragraph and 800-paragraph essay (no crash, exact rebuild, expected change counts), the re-split freeze input (under 5 s, exact), and large inputs with different sentence counts, repeated phrases and completely different text (exact, no change with before = after). On the `75920d6` code the two crash tests fail with "Maximum call stack size exceeded" and the freeze test does not finish in 40 s.
+- Lint/typecheck: clean. Production build: OK.
+- Unit + integration (Vitest, with coverage): **815 passed**, 0 failed, in each of 3 full runs; coverage 99.68% statements, 98.63% branches, 99.85% functions, 100% lines. The long-document Studio test passed 7 of 7 runs with coverage (4.7–6.0 s in the 4 runs that printed its time).
+- Browser (Playwright, real Chromium, production build): **43 passed**, 0 failed.
+- Benchmarks (Node, 3 runs each, all exact): 500,000-character paragraph 2.4–2.6 s (34,883 changes); 471,000-character essay 0.9–1.0 s; 589,000-character essay 1.0–1.2 s; 498,000 characters on one line 0.55–0.67 s; the freeze input 0.14–0.15 s; 100,000 characters of completely different text 0.74–0.89 s; 800 shuffled sentences 0.66–0.74 s; "a. " × 66,000 → "a! " 3.2–3.6 s (66,000 changes; every sentence differs).
+- In the browser (Chromium, production build): the 471,000-character essay and the 500,000-character paragraph both show the Studio (7,999 and 34,883 changes), with no errors.
+- Not run for these changes: the Linux packaged-app and Windows desktop suites. Only `src/humanize/diff.ts`, one Studio heading and tests changed.
 
 ## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)
 

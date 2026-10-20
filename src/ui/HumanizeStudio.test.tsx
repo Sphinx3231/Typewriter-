@@ -23,9 +23,11 @@ function Live() {
 function setup(text = ROBOTIC) {
   localStorage.setItem("typewriter:settings", JSON.stringify(FAST));
   localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: true }));
-  render(<Live />);
+  const { container } = render(<Live />);
   act(() => latest.setText(text));
-  return () => latest;
+  // `view` queries only this test's own render, so an interaction still pending after a timeout
+  // can never reach the next test's elements.
+  return Object.assign(() => latest, { view: within(container) });
 }
 
 beforeEach(() => localStorage.clear());
@@ -266,6 +268,8 @@ describe("Humanization Studio", () => {
     expect(screen.queryByTestId("studio")).toBeNull();
   });
 
+  // Measured: about 4 s alone, 5–6 s with coverage on a loaded machine (the old 5 s default
+  // timed out). The 8 s render budget below is the real check; the timeout leaves room for it.
   it("stays usable on a long document: over a thousand changes, the list shown in pages", async () => {
     const long = (ROBOTIC + "\n\n").repeat(160);
     const expected = humanize(long);
@@ -273,24 +277,25 @@ describe("Humanization Studio", () => {
     expect(n).toBeGreaterThan(1400);
     const t0 = performance.now();
     const s = setup(long);
-    expect(screen.queryByTestId("studio")).toBeNull(); // over 20,000 characters: checked after a pause in editing
+    const { view } = s;
+    expect(view.queryByTestId("studio")).toBeNull(); // over 20,000 characters: checked after a pause in editing
     await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
-    expect(changeButtons()).toHaveLength(n);
+    expect(changeButtons(view.getByTestId("studio"))).toHaveLength(n);
     expect(performance.now() - t0).toBeLessThan(8000);
-    expect(textOf("studio-summary")).toMatch(new RegExp(`^${n.toLocaleString()} changes · `));
-    fireEvent.click(screen.getByTestId("studio-only"));
-    const items = () => within(screen.getByTestId("studio-list")).getAllByRole("listitem");
+    expect(view.getByTestId("studio-summary").textContent).toMatch(new RegExp(`^${n.toLocaleString()} changes · `));
+    fireEvent.click(view.getByTestId("studio-only"));
+    const items = () => within(view.getByTestId("studio-list")).getAllByRole("listitem");
     expect(items()).toHaveLength(201);
     const more = `Show 200 more of ${(n - 200).toLocaleString()} remaining`;
-    await userEvent.click(screen.getByText(more));
+    await userEvent.click(view.getByText(more));
     expect(items()).toHaveLength(401);
     // Walking past the shown part of the list loads more.
     await userEvent.click(items()[399].querySelector("button")!);
-    await userEvent.click(screen.getByTestId("studio-next"));
-    expect(pos()).toBe(`Change 401 of ${n}`);
+    await userEvent.click(view.getByTestId("studio-next"));
+    expect(view.getByTestId("studio-pos").textContent).toBe(`Change 401 of ${n}`);
     expect(items()).toHaveLength(601);
     expect(s().humanize.prepared).toBe(expected.output);
-  });
+  }, 30_000);
 });
 
 describe("Humanization Studio: punctuation, spacing, additions", () => {

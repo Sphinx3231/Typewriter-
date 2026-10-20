@@ -224,7 +224,8 @@ function diffTokens(a: string[], b: string[], out: Piece[], depth = 0) {
   }
   for (const text of a.slice(a.length - suf)) p.push({ op: 0, text });
   slide(p);
-  out.push(...p);
+  // One at a time: spreading a large array into push() overflows the call stack.
+  for (const piece of p) out.push(piece);
 }
 
 /** Sentences (each with its trailing spaces) and lines; joined, they give back the text exactly. */
@@ -285,6 +286,19 @@ function bySentence(x: string, y: string, out: Piece[], depth: number): boolean 
 
 const lines = (t: string) => t.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 
+/** Blocks larger than this (both texts' characters together) are split into sentences first. */
+const SENTENCE_FIRST = 50_000;
+
+/**
+ * Diff a block of text. A very large block (a long one-paragraph document) goes sentence by
+ * sentence straight away: word-splitting and diffing it whole would fail MAX_D anyway, after
+ * seconds of work, and then every sentence would be split into words a second time.
+ */
+function diffBlock(x: string, y: string, out: Piece[]) {
+  if (x && y && x.length + y.length > SENTENCE_FIRST && bySentence(x, y, out, 0)) return;
+  diffTokens(tokenize(x), tokenize(y), out);
+}
+
 function diffPieces(original: string, revised: string): Piece[] {
   const out: Piece[] = [];
   const la = lines(original);
@@ -292,7 +306,7 @@ function diffPieces(original: string, revised: string): Piece[] {
   const [ia, ib] = intern([la, lb]);
   const ops = myers(ia, ib, MAX_D);
   if (!ops) {
-    diffTokens(tokenize(original), tokenize(revised), out);
+    diffBlock(original, revised, out);
     return out;
   }
   // Same lines stay whole; each run of changed lines is diffed word by word.
@@ -301,7 +315,7 @@ function diffPieces(original: string, revised: string): Piece[] {
   let del: string[] = [];
   let ins: string[] = [];
   const flush = () => {
-    if (del.length || ins.length) diffTokens(tokenize(del.join("")), tokenize(ins.join("")), out);
+    if (del.length || ins.length) diffBlock(del.join(""), ins.join(""), out);
     del = [];
     ins = [];
   };
@@ -346,11 +360,55 @@ function sentenceIndex(starts: number[], pos: number): number {
   return lo;
 }
 
+/** A run of the diff: unchanged text (before === after) or one change. */
+type Run = { same: boolean; before: string; after: string };
+
+const RESPLIT_MAX_CUTS = 16;
+
+/**
+ * For [change][space][change], the pair of spaces (one in each text) whose halves share the most
+ * words, as three new runs; null to keep the current split. Each half's words are counted once
+ * per space, so the search is (spaces before × spaces after) set lookups, not a recount each time.
+ */
+function resplit(prev: Run, gap: Run, next: Run): [Run, Run, Run] | null {
+  const before = prev.before + gap.before + next.before;
+  const after = prev.after + gap.after + next.after;
+  const cuts = (t: string) => Array.from(t.matchAll(/[ \t]+/g), (m) => [m.index!, m.index! + m[0].length]).filter(([s, e]) => s > 0 && e < t.length);
+  const cb = cuts(before);
+  const ca = cuts(after);
+  if (!cb.length || !ca.length || cb.length > RESPLIT_MAX_CUTS || ca.length > RESPLIT_MAX_CUTS) return null;
+  const halves = (t: string, c: number[]) => [wordsOf(t.slice(0, c[0])), wordsOf(t.slice(c[1]))];
+  const shared = (x: string[], y: string[]) => {
+    const w = new Set(x);
+    let n = 0;
+    for (const v of y) if (w.has(v)) n++;
+    return n;
+  };
+  const rate = (hb: string[][], ha: string[][]) => shared(hb[0], ha[0]) + shared(hb[1], ha[1]);
+  const hb = cb.map((c) => halves(before, c));
+  const ha = ca.map((c) => halves(after, c));
+  const now = [prev.before.length, prev.before.length + gap.before.length];
+  const nowA = [prev.after.length, prev.after.length + gap.after.length];
+  let best = { b: now, a: nowA, score: rate(halves(before, now), halves(after, nowA)) };
+  for (let i = 0; i < cb.length; i++)
+    for (let j = 0; j < ca.length; j++) {
+      if (before.slice(cb[i][0], cb[i][1]) !== after.slice(ca[j][0], ca[j][1])) continue;
+      const sc = rate(hb[i], ha[j]);
+      if (sc > best.score) best = { b: cb[i], a: ca[j], score: sc };
+    }
+  if (best.b === now) return null;
+  const space = before.slice(best.b[0], best.b[1]);
+  return [
+    { same: false, before: before.slice(0, best.b[0]), after: after.slice(0, best.a[0]) },
+    { same: true, before: space, after: space },
+    { same: false, before: before.slice(best.b[1]), after: after.slice(best.a[1]) },
+  ];
+}
+
 export function diffText(original: string, revised: string): TextDiff {
   const pieces = original === revised ? [{ op: 0 as Op, text: original }] : diffPieces(original, revised);
 
   // Group: a change is a run of deletions and insertions.
-  type Run = { same: boolean; before: string; after: string };
   const runs: Run[] = [];
   for (const p of pieces) {
     if (!p.text) continue;
@@ -361,55 +419,51 @@ export function diffText(original: string, revised: string): TextDiff {
       if (p.op !== 1) last.after += p.text;
     } else runs.push({ same, before: p.op === 2 ? "" : p.text, after: p.op === 1 ? "" : p.text });
   }
+  // The passes below rebuild the list in one sweep each (no splice inside a loop), so documents
+  // with tens of thousands of changes stay linear.
+
   // Myers may anchor on a lone space inside one edit ("In␠today's…technology" → "Technology" can
   // come out as In→Technology, ␠, today's…technology→∅). Join two changes across a space-only gap
   // when one of them is a pure removal or addition; two real replacements next to each other
   // ("schools" and "commence") stay separate.
   const oneSided = (r: Run) => !r.before || !r.after;
-  for (let r = 1; r < runs.length - 1; r++) {
-    const [prev, gap, next] = [runs[r - 1], runs[r], runs[r + 1]];
-    if (gap.same && /^[ \t]+$/.test(gap.before) && !prev.same && !next.same && (oneSided(prev) || oneSided(next))) {
-      runs.splice(r - 1, 3, { same: false, before: prev.before + gap.before + next.before, after: prev.after + gap.after + next.after });
-      r--;
-    }
+  const isGap = (r: Run) => r.same && /^[ \t]+$/.test(r.before);
+  const joined: Run[] = [];
+  for (const next of runs) {
+    const n = joined.length;
+    const gap = joined[n - 1];
+    const prev = joined[n - 2];
+    if (n >= 2 && !next.same && isGap(gap) && !prev.same && (oneSided(prev) || oneSided(next))) {
+      joined.length = n - 2;
+      joined.push({ same: false, before: prev.before + gap.before + next.before, after: prev.after + gap.after + next.after });
+    } else joined.push(next);
   }
   // Two replacements separated by one space can be split at the wrong space ("Additionally," →
   // "Schools" and "it … schools commence" → "start"). Re-split at the pair of spaces whose halves
   // share the most words ("… schools" → "Schools", "commence" → "start"). Any split is exact.
-  for (let r = 1; r < runs.length - 1; r++) {
-    const [prev, gap, next] = [runs[r - 1], runs[r], runs[r + 1]];
-    if (!(gap.same && /^[ \t]+$/.test(gap.before) && !prev.same && !next.same)) continue;
-    const before = prev.before + gap.before + next.before;
-    const after = prev.after + gap.after + next.after;
-    const cuts = (t: string) => [...t.matchAll(/[ \t]+/g)].map((m) => [m.index!, m.index! + m[0].length]);
-    const shared = (x: string, y: string) => {
-      const w = new Set(wordsOf(x));
-      return wordsOf(y).filter((v) => w.has(v)).length;
-    };
-    const rate = (b: number[], a: number[]) => shared(before.slice(0, b[0]), after.slice(0, a[0])) + shared(before.slice(b[1]), after.slice(a[1]));
-    const now = [prev.before.length, prev.before.length + gap.before.length];
-    const nowA = [prev.after.length, prev.after.length + gap.after.length];
-    let best = { b: now, a: nowA, score: rate(now, nowA) };
-    for (const b of cuts(before))
-      for (const a of cuts(after)) {
-        if (before.slice(b[0], b[1]) !== after.slice(a[0], a[1]) || b[0] === 0 || a[0] === 0 || b[1] === before.length || a[1] === after.length) continue;
-        const sc = rate(b, a);
-        if (sc > best.score) best = { b, a, score: sc };
-      }
-    if (best.b !== now) {
-      runs.splice(
-        r - 1,
-        3,
-        { same: false, before: before.slice(0, best.b[0]), after: after.slice(0, best.a[0]) },
-        { same: true, before: before.slice(best.b[0], best.b[1]), after: before.slice(best.b[0], best.b[1]) },
-        { same: false, before: before.slice(best.b[1]), after: after.slice(best.a[1]) },
-      );
-    }
+  // Only for edits of up to RESPLIT_MAX_CUTS spaces a side: the search compares every pair of
+  // spaces, and longer edits (which the rewrite rules never make) keep Myers' split.
+  for (let r = 1; r < joined.length - 1; r++) {
+    const [prev, gap, next] = [joined[r - 1], joined[r], joined[r + 1]];
+    if (!(isGap(gap) && !prev.same && !next.same)) continue;
+    const better = resplit(prev, gap, next);
+    if (better) [joined[r - 1], joined[r], joined[r + 1]] = better;
   }
-  // Whitespace both sides share at a change's edges belongs to the unchanged text.
-  for (let r = 0; r < runs.length; r++) {
-    const c = runs[r];
-    if (c.same) continue;
+  // Whitespace both sides share at a change's edges belongs to the unchanged text; then
+  // neighbouring unchanged runs merge.
+  const tidy: Run[] = [];
+  const add = (run: Run) => {
+    const last = tidy[tidy.length - 1];
+    if (run.same && last?.same) {
+      last.before += run.before;
+      last.after += run.after;
+    } else tidy.push(run);
+  };
+  for (const c of joined) {
+    if (c.same) {
+      add(c);
+      continue;
+    }
     let lead = 0;
     while (lead < c.before.length && lead < c.after.length && c.before[lead] === c.after[lead] && /\s/.test(c.before[lead])) lead++;
     let tail = 0;
@@ -420,27 +474,16 @@ export function diffText(original: string, revised: string): TextDiff {
       /\s/.test(c.before[c.before.length - 1 - tail])
     )
       tail++;
-    if (!lead && !tail) continue;
-    const parts: Run[] = [];
-    if (lead) parts.push({ same: true, before: c.before.slice(0, lead), after: c.before.slice(0, lead) });
-    parts.push({ same: false, before: c.before.slice(lead, c.before.length - tail), after: c.after.slice(lead, c.after.length - tail) });
-    if (tail) parts.push({ same: true, before: c.before.slice(c.before.length - tail), after: c.before.slice(c.before.length - tail) });
-    runs.splice(r, 1, ...parts);
-    r += parts.length - 1;
-  }
-  for (let r = 1; r < runs.length; r++) {
-    if (runs[r].same && runs[r - 1].same) {
-      runs[r - 1].before += runs[r].before;
-      runs[r - 1].after += runs[r].after;
-      runs.splice(r--, 1);
-    }
+    if (lead) add({ same: true, before: c.before.slice(0, lead), after: c.before.slice(0, lead) });
+    add({ same: false, before: c.before.slice(lead, c.before.length - tail), after: c.after.slice(lead, c.after.length - tail) });
+    if (tail) add({ same: true, before: c.before.slice(c.before.length - tail), after: c.before.slice(c.before.length - tail) });
   }
 
   const segments: Segment[] = [];
   const changes: Change[] = [];
   let o = 0;
   let v = 0;
-  for (const r of runs) {
+  for (const r of tidy) {
     if (r.same) segments.push({ kind: "same", text: r.before, origStart: o, revStart: v });
     else {
       const c: Change = {
