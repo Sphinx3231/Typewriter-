@@ -36,7 +36,11 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
 - Browser (Playwright, real Chromium): **32 passed**. New: full Studio flow, ending with a per-change revert typed exactly with no markup, copy both versions, re-run, restore; both themes with real computed colors and decoration (underline vs line-through), plus screenshots; a 94,000-character document (Studio shown ≈2.3 s after the text was set, 20 steps + 2 view switches ≈1.5–1.9 s).
 - Native (Rust): all suites pass (no Rust changes).
 - Linux desktop E2E (packaged app, Xvfb): **25/25**, including: humanized copy exact (typos on); one change kept as original → exactly that mix in a real window, with no markup; off → exact original.
-- Windows desktop E2E: the same check is in `e2e-desktop/windows.mjs`. Result: see the board.
+- Windows desktop E2E (GitHub `windows-2022`, the installed app), run 32 (`f987d7a0`):
+  - The Studio check passed in both attempts: humanized copy exact; one change kept as original, exactly that mix; off, exact original.
+  - Attempt 1 failed one unrelated check: "the Chrome extension in Opera", where Opera's DevTools didn't answer while starting.
+  - Attempt 2, a single re-run of that job, passed **every check**, the Opera ones included.
+  - The macOS and Linux builds succeeded. No release was published.
 
 **Limitations:**
 - In the app's default three-column layout the Studio sits in the editor column, so "Side by side" stacks the two texts on narrow widths.
