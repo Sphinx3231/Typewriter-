@@ -457,23 +457,44 @@ async function main() {
     const view = (name) => ui(`([...document.querySelectorAll('[data-testid="studio"] [role="radio"]')].find((x) => x.textContent.trim() === "${name}").click(), 1)`);
     await view("Side by side");
     await sleep(400);
-    const lay = JSON.parse(
-      await ui(`JSON.stringify((() => {
-        const s = document.querySelector('[data-testid="studio"]').getBoundingClientRect();
-        const cols = [...document.querySelectorAll(".studio__col")].map((c) => c.getBoundingClientRect());
-        return {
-          width: innerWidth,
-          widths: cols.map((c) => Math.round(c.width)),
-          sameRow: cols.length === 2 && Math.abs(cols[0].top - cols[1].top) < 2,
-          inside: cols.every((c) => c.left >= s.left - 0.5 && c.right <= s.right + 0.5),
-          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        };
-      })())`),
-    );
-    console.log(`    side by side in a ${lay.width}px window: ${lay.sameRow ? "next to each other" : "stacked"}, columns ${lay.widths.join(" + ")} px, overflow ${lay.overflow} px`);
-    assert(lay.widths.length === 2 && lay.sameRow === lay.width > 640, `side by side layout wrong: ${JSON.stringify(lay)}`);
-    assert(lay.inside && lay.overflow <= 0, `the Studio overflows: ${JSON.stringify(lay)}`);
-    if (lay.sameRow) assert(Math.min(...lay.widths) > 200, `columns too narrow: ${JSON.stringify(lay)}`);
+    const measure = async () => {
+      const lay = JSON.parse(
+        await ui(`JSON.stringify((() => {
+          const studio = document.querySelector('[data-testid="studio"]');
+          const s = studio.getBoundingClientRect();
+          const els = [...document.querySelectorAll(".studio__col")];
+          const cols = els.map((c) => c.getBoundingClientRect());
+          // Nothing (such as the sticky Settings panel) may lie on top of the text columns.
+          const covered = els.some((c) => {
+            c.scrollIntoView({ block: "center" });
+            const r = c.getBoundingClientRect();
+            const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
+            return [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !c.contains(document.elementFromPoint(x, y)));
+          });
+          return {
+            width: innerWidth,
+            widths: cols.map((c) => Math.round(c.width)),
+            sameRow: cols.length === 2 && Math.abs(cols[0].top - cols[1].top) < 2,
+            inside: cols.every((c) => c.left >= s.left - 0.5 && c.right <= s.right + 0.5),
+            overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            covered,
+          };
+        })())`),
+      );
+      console.log(`    side by side in a ${lay.width}px window: ${lay.sameRow ? "next to each other" : "stacked"}, columns ${lay.widths.join(" + ")} px, overflow ${lay.overflow} px${lay.covered ? ", COVERED" : ""}`);
+      assert(lay.widths.length === 2 && lay.sameRow === lay.width > 640, `side by side layout wrong: ${JSON.stringify(lay)}`);
+      assert(lay.inside && lay.overflow <= 0, `the Studio overflows: ${JSON.stringify(lay)}`);
+      assert(!lay.covered, `something covers the Studio: ${JSON.stringify(lay)}`);
+      if (lay.sameRow) assert(Math.min(...lay.widths) > 200, `columns too narrow: ${JSON.stringify(lay)}`);
+    };
+    await measure();
+    // A smaller window (a laptop with display scaling): the Studio moves below Settings, full width.
+    const win = await mainWindow();
+    xdo("windowsize", "--sync", win, "1050", "860");
+    await sleep(800);
+    await measure();
+    xdo("windowsize", "--sync", win, "1360", "900");
+    await sleep(800);
     await ui(`(document.querySelector('[data-testid="studio"]').scrollIntoView({ block: "start" }), 1)`);
     await sleep(300);
     shot("desktop-studio-side-by-side");

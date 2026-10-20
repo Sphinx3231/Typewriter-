@@ -621,8 +621,13 @@ test.describe("Humanization Studio", () => {
     [1920, true],
     [1440, true],
     [1280, true],
+    [1260, true],
     [1100, true],
+    [1028, true],
+    [1025, true],
+    [1024, true],
     [900, true],
+    [700, true],
     [390, false],
   ] as const) {
     test(`layout at ${width}px: side by side ${together ? "shows both texts next to each other" : "stacks them"}, no horizontal overflow`, async ({ browser }) => {
@@ -647,9 +652,19 @@ test.describe("Humanization Studio", () => {
           selected: [...document.querySelectorAll('[data-testid="studio"] .is-selected')].map((e) => (e as HTMLElement).dataset.change),
         };
       });
+      // Nothing (such as the sticky Settings panel) lies on top of the Studio's text columns.
+      const covered = await page.evaluate(() =>
+        [...document.querySelectorAll(".studio__col")].some((c) => {
+          c.scrollIntoView({ block: "center" });
+          const r = c.getBoundingClientRect();
+          const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
+          return [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !c.contains(document.elementFromPoint(x, y)));
+        }),
+      );
       expect(m.sameRow).toBe(together);
       expect(m.inside).toBe(true);
       expect(m.overflow).toBe(0);
+      expect(covered).toBe(false);
       if (together) expect(m.minCol).toBeGreaterThan(200);
       // The selected change stays selected in both texts.
       expect(m.selected).toEqual(["0", "0"]);

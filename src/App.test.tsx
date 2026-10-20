@@ -47,14 +47,17 @@ afterEach(() => {
 });
 
 describe("App (browser preview)", () => {
-  it("shows the Humanization Studio as its own panel next to the editor and playback, spanning both", async () => {
+  it("shows the Humanization Studio as its own panel in the workspace grid, between the text panels and Settings", async () => {
     const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("./humanize/fixtures");
     localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: true }));
     renderApp();
     expect(screen.queryByTestId("studio")).toBeNull();
     typeText(ROBOTIC);
     const studio = screen.getByTestId("studio");
-    expect(studio.parentElement!.className).toContain("workspace__texts");
+    expect(studio.parentElement!.className).toContain("workspace__grid");
+    // Reading and tab order: the text panels, then the Studio, then Settings.
+    expect(studio.previousElementSibling!.className).toContain("workspace__texts");
+    expect(studio.nextElementSibling!.className).toContain("settings");
     expect(studio.closest(".editor")).toBeNull();
     expect(editor().value).toBe(ROBOTIC);
     fireEvent.click(screen.getByTestId("studio-highlight"));

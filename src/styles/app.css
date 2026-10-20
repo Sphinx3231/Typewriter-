@@ -299,8 +299,20 @@ kbd {
 .workspace__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 352px;
+  /* Row 2 (the Studio) is flexible, so the tall Settings column spanning both rows never
+     stretches row 1 and the Studio sits right under the text panels. */
+  grid-template-rows: auto 1fr;
   gap: var(--sp-5);
   align-items: start;
+}
+.workspace__grid > .workspace__texts {
+  grid-area: 1 / 1;
+}
+.workspace__grid > .studio {
+  grid-area: 2 / 1;
+}
+.workspace__grid > .settings {
+  grid-area: 1 / 2 / span 2;
 }
 .workspace__texts {
   display: grid;
@@ -1564,6 +1576,16 @@ fieldset:disabled .segmented__opt {
   .workspace__texts {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* The main column is too narrow here for two readable texts: the Studio goes below
+     Settings, across the full width. */
+  .workspace__grid > .settings {
+    grid-row: 1;
+    /* Not sticky here, or it would slide over the Studio below it. */
+    position: static;
+  }
+  .workspace__grid > .studio {
+    grid-column: 1 / -1;
+  }
   .editor__input {
     min-height: 220px;
   }
@@ -1584,6 +1606,14 @@ fieldset:disabled .segmented__opt {
   }
   .workspace__grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  /* One column: the texts, then the Studio, then Settings. */
+  .workspace__grid > .studio {
+    grid-area: 2 / 1;
+  }
+  .workspace__grid > .settings {
+    grid-area: 3 / 1;
   }
   .workspace__texts {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2005,7 +2035,6 @@ fieldset:disabled .segmented__opt {
 /* ---- Humanization Studio: what changed, inline ---- */
 /* Its own panel under the editor and playback, spanning both, so "Side by side" has room. */
 .studio {
-  grid-column: 1 / -1;
   min-width: 0;
   color: var(--text);
   display: grid;

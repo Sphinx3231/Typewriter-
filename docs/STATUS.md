@@ -24,7 +24,7 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
   - re-run always checks the original;
   - nothing changes while typing.
 - **UI** (`src/ui/HumanizeStudio.tsx`, styles in `app.css`, colors in `tokens.css`):
-  - the Studio is its own full-width panel below the editor and playback panels; the status line under the editor keeps the score and offers **Review the changes**, which scrolls to the Studio and focuses it;
+  - the Studio is its own panel: under the editor and playback panels in windows wider than 1260 px, and below Settings across the full width from 1025 to 1260 px (where the main column is too narrow for two texts); the status line under the editor keeps the score and offers **Review the changes**, which scrolls to the Studio and focuses it;
   - Side by side puts the two texts next to each other above 640 px of window width and stacks them below that;
   - three views, highlights on/off, changes only (in pages of 200), previous/next with Alt+↑/↓, an explanation card, keep original wording / use revised wording, copy revised/original, restore original, re-run on original;
   - the failure status is now "Humanization unavailable … Your original text will be typed, exactly as written."
@@ -53,18 +53,21 @@ Extends Smart Humanization (below). Automatic humanization is unchanged: no appr
 ### Merge-readiness pass (2026-10-20)
 
 Issues found and fixed:
-1. **Side by side stacked in the narrow editor column.** Measured in Chromium (production build): at 1440 and 1280 px the two texts stacked, and at 1280 px the columns overflowed the panel. The Studio is now its own full-width panel; status line → **Review the changes**. Measured after: side by side at 1920/1440/1280/1100/900 px (columns 588/382/302/212/404 px), stacked at 390 px, no horizontal overflow anywhere. Packaged Linux app (WebKitGTK, 1360 px window): side by side, columns 342 + 342 px, no overflow.
+1. **Side by side stacked in the narrow editor column.** Measured in Chromium (production build): at 1440 and 1280 px the two texts stacked, and at 1280 px the columns overflowed the panel. The Studio is now its own panel; status line → **Review the changes**.
 2. **A long single-paragraph text showed as one whole-text change.** The word-level diff gave up past its limit (e.g. "Moreover, we utilize it in order to learn. " × 3000, 129,000 characters, 1 change). It now falls back to a sentence-by-sentence diff first: 8,999 word-level changes, both texts rebuilt exactly.
+3. **Columns too narrow in 1025–1260 px windows** (found by Windows run 33 on `44cf88f`, whose window was 1028 px: columns 161 + 161 px). The sidebar and the Settings column leave the main column about 400 px there. Fix: in that range the Studio goes below Settings across the full width, and Settings is not sticky there (it slid over the Studio and blocked clicks, caught by a new "nothing covers the Studio" check).
+   - Measured after, Chromium, column widths in px: 1920 → 588+588, 1440 → 382+382, 1280 → 302+302, 1260 → 466+466, 1100 → 386+386, 1028 → 350+350, 1025 → 349+349, 1024 → 466+466, 900 → 404+404, 700 → 316+316 (all side by side); 390 → stacked. No horizontal overflow and nothing on top of the Studio at any width.
+   - Packaged Linux app (WebKitGTK): 1360 px window → 342+342; resized to 1050 px → 361+361.
 
 Audited with new tests (no defect found): exactly 50% on the **real** checklist (casual tone, 4 of 8 checks) is rewritten and typed, 3 of 8 is not; off, and on with nothing to change, types Unicode, emoji, combining marks, CRLF, tabs, no-break spaces and repeated blank lines exactly; empty and blank input produce no Studio and nothing to revert; a change put back in the Studio reaches the desktop engine as exactly that plain text (source and replayed key events), with no markup; a checklist failure types the original (existing test). There is no model, network call or timeout in this feature (local rules only), so "model error / timeout" reduces to the checklist-failure path.
 
 Tests run in this container for this pass:
 - Lint/typecheck: clean. Production build: OK.
 - Unit + integration (Vitest): **811 passed**, 0 failed (48 files); coverage 99.68% statements, 98.58% branches, 99.85% functions, 100% lines.
-- Browser (Playwright, real Chromium, production build): **38 passed**, 0 failed (6 new layout tests).
+- Browser (Playwright, real Chromium, production build): **43 passed**, 0 failed (11 new layout tests, 390–1920 px).
 - Native (Rust): 9 + 38 + 32 + 3 + 15 passed, 0 failed.
-- Linux desktop E2E (packaged app, Xvfb): **25 passed**, 0 failed; the Studio check now also measures the side-by-side layout in the real webview.
-- Windows desktop E2E (Notepad, an Opera text field, a Docs-like page in Opera, the installed app): **not run on this commit** (it needs a push). The same layout check was added to `e2e-desktop/windows.mjs`.
+- Linux desktop E2E (packaged app, Xvfb): **25 passed**, 0 failed; the Studio check now also measures the side-by-side layout in the real webview, at 1360 px and at 1050 px.
+- Windows desktop E2E (GitHub `windows-2022`, the installed app), run 33 on `44cf88f`: **17 of 18 passed**: Notepad, a plain text field in Opera, a Google-Docs-like page in Opera, Chrome and Edge (stand-ins, not Google Docs), the extension in Opera, tab switching, pause/stop, closing. **Failed:** the Smart Humanization check, at its new layout assertion (issue 3 above), before it reached typing. The fix is not yet run on Windows.
 - Not verified: real Google Docs, and the owner's own PC.
 
 ## Smart Humanization (2026-10-19, not merged, not in the v1.2.0 release)

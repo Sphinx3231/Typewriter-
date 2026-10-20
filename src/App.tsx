@@ -205,8 +205,8 @@ export default function App() {
                   />
                   <ActivityLog snapshot={snapshot} />
                 </section>
-                <StudioPanel session={session} />
               </div>
+              <StudioPanel session={session} />
               <SettingsPanel session={session} />
             </div>
           </div>
