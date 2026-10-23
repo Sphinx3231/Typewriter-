@@ -118,6 +118,9 @@ jobs:
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
+          # Control: the previous version, reopened, really kept them (so a loss below is the upgrade's).
+          node e2e-desktop/upgrade.mjs check $exe.FullName upgrade-state.json
+          if ($LASTEXITCODE -ne 0) { throw "the previous version itself did not keep the settings" }
       - name: Install the new setup.exe silently over it and find it
         shell: pwsh
         run: |

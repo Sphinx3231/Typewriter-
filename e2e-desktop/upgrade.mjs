@@ -3,14 +3,21 @@
  * version over it.
  *
  *   node e2e-desktop/upgrade.mjs before <app> <state.json>   in the old version: change settings, save them
+ *   node e2e-desktop/upgrade.mjs check <app> <state.json>    the old version again: they were really saved
  *   (install the new version over the old one)
  *   node e2e-desktop/upgrade.mjs after <app> <state.json>    in the new version: every saved setting is still there
+ *
+ * Each run ends by closing the app the way a user does (the title bar's X; Alt+F4 on Linux) and
+ * waits for it to exit by itself: ending the WebDriver session kills the process, which can lose
+ * storage writes that weren't flushed yet. "check" tells "not saved" apart from "lost by the upgrade".
  *
  * Linux: runs on its own Xvfb display (:98) and uses $HOME as the user. Windows: the current user.
  * Needs tauri-driver (and msedgedriver on Windows) on PATH.
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 const [mode, app, stateFile] = process.argv.slice(2);
 const linux = process.platform === "linux";
 const env = linux ? { ...process.env, DISPLAY: ":98", GDK_BACKEND: "x11", XDG_SESSION_TYPE: "x11" } : process.env;
@@ -23,6 +30,22 @@ async function wd(m, p, b) {
   const j = await r.json();
   if (j.value && j.value.error) throw new Error(`${p}: ${j.value.error} ${j.value.message}`);
   return j.value;
+}
+const here = dirname(fileURLToPath(import.meta.url));
+const running = () =>
+  linux
+    ? (() => { try { execFileSync("pgrep", ["-x", "typewriter"]); return true; } catch { return false; } })()
+    : /typewriter\.exe/i.test(execFileSync("tasklist", ["/FI", "IMAGENAME eq typewriter.exe", "/NH"]).toString());
+/** Closes the main window like a user (its X button / Alt+F4) and waits for the app to exit by itself. */
+async function closeLikeUser() {
+  if (linux) {
+    const id = execFileSync("xdotool", ["search", "--name", "^Typewriter$"], { env }).toString().trim().split("\n").pop();
+    execFileSync("xdotool", ["windowactivate", "--sync", id], { env });
+    execFileSync("xdotool", ["key", "--clearmodifiers", "alt+F4"], { env });
+  } else {
+    execFileSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(here, "win", "input.ps1"), "sysclose", "Typewriter"]);
+  }
+  await until(() => !running(), 20000, "Typewriter to exit after its window was closed");
 }
 async function until(fn, ms, what) { const t = Date.now(); for (;;) { try { const v = await fn(); if (v) return v; } catch {} if (Date.now() - t > ms) throw new Error("timed out: " + what); await sleep(200); } }
 if (linux) {
@@ -57,6 +80,7 @@ try {
     writeFileSync(stateFile, JSON.stringify({ ui: after, ls }, null, 1));
     console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}`);
   } else {
+    const label = mode === "check" ? "reopened, before the upgrade" : "after the upgrade";
     const saved = JSON.parse(readFileSync(stateFile, "utf8"));
     const ls = JSON.parse(await dump());
     const lost = Object.keys(saved.ls).filter((k) => !(k in ls));
@@ -64,12 +88,15 @@ try {
     const parse = (v) => { try { return JSON.parse(v); } catch { return v; } };
     const kept = (was, now) => (was && typeof was === "object" && now && typeof now === "object" ? Object.keys(was).every((f) => JSON.stringify(was[f]) === JSON.stringify(now[f])) : was === now);
     const changed = Object.keys(saved.ls).filter((k) => k in ls && !kept(parse(saved.ls[k]), parse(ls[k])));
-    console.log(`after (${app}): ui ${JSON.stringify(ui)}; keys kept ${Object.keys(saved.ls).length - lost.length}/${Object.keys(saved.ls).length}; lost [${lost}]; values changed [${changed}]`);
+    console.log(`${label} (${app}): ui ${JSON.stringify(ui)}; keys kept ${Object.keys(saved.ls).length - lost.length}/${Object.keys(saved.ls).length}; lost [${lost}]; values changed [${changed}]`);
     for (const k of changed) console.log(`  changed ${k}:\n    was ${saved.ls[k].slice(0, 400)}\n    now ${ls[k].slice(0, 400)}`);
     const ok = lost.length === 0 && changed.length === 0 && JSON.stringify(ui) === JSON.stringify(saved.ui);
-    console.log(ok ? "UPGRADE PRESERVED SETTINGS: PASS" : "UPGRADE PRESERVED SETTINGS: FAIL");
+    const what = mode === "check" ? "SETTINGS SAVED BEFORE THE UPGRADE" : "UPGRADE PRESERVED SETTINGS";
+    console.log(`${what}: ${ok ? "PASS" : "FAIL"}`);
     process.exitCode = ok ? 0 : 1;
   }
+  await closeLikeUser();
+  console.log("closed like a user; the app exited by itself");
 } finally {
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
   await sleep(800);
