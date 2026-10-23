@@ -2,7 +2,7 @@
  * Upgrade check: the settings a user saved in the installed version survive installing the new
  * version over it.
  *
- *   node e2e-desktop/upgrade.mjs before <app> <state.json>   in the old version: change settings, save them
+ *   node e2e-desktop/upgrade.mjs before <app> <state.json>   in the old version: change settings, then close (SETTLE_MS later)
  *   node e2e-desktop/upgrade.mjs check <app> <state.json>    the old version again: they were really saved
  *   (install the new version over the old one)
  *   node e2e-desktop/upgrade.mjs after <app> <state.json>    in the new version: every saved setting is still there
@@ -78,7 +78,11 @@ try {
     const ls = JSON.parse(await dump());
     if (!Object.keys(ls).length) throw new Error("nothing was saved");
     writeFileSync(stateFile, JSON.stringify({ ui: after, ls }, null, 1));
-    console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}`);
+    // SETTLE_MS: give an old version time to save before it closes (on Windows, v1.2.0 loses
+    // changes made in the last seconds before closing). Without it, the app is closed at once.
+    const settle = Number(process.env.SETTLE_MS || 0);
+    if (settle) await sleep(settle);
+    console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}; closing ${settle ? `${settle} ms after the change` : "at once"}`);
   } else {
     const label = mode === "check" ? "reopened, before the upgrade" : "after the upgrade";
     const saved = JSON.parse(readFileSync(stateFile, "utf8"));

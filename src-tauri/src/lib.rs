@@ -152,6 +152,8 @@ struct AppState {
     workers: Mutex<Vec<std::thread::JoinHandle<String>>>,
     /// Set once the typing threads have been waited for, so the final exit can proceed.
     cleaned_up: std::sync::atomic::AtomicBool,
+    /// Set while a postponed exit is being prepared, so a second exit request doesn't start another.
+    exiting: std::sync::atomic::AtomicBool,
     /// Close requests of the main window, and the latest one its page has answered.
     close_requests: AtomicU64,
     close_answered: AtomicU64,
@@ -403,6 +405,63 @@ fn show_hud(app: &AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Windows: WebView2 writes the pages' storage (settings, theme, history) to disk a few seconds
+/// after a change, in its own browser process. If Typewriter exits before that process has shut
+/// down, a change made just before closing is lost. So the exit waits for it (BrowserProcessExited),
+/// with a time limit so closing can never hang.
+#[cfg(windows)]
+mod storage_flush {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    use tauri::{AppHandle, Manager};
+    use webview2_com::{BrowserProcessExitedEventHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2Environment5};
+    use windows_core::Interface;
+
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    static EXITED: AtomicBool = AtomicBool::new(false);
+    static DONE: AtomicBool = AtomicBool::new(false);
+    const LIMIT: Duration = Duration::from_secs(6);
+
+    pub fn watch(window: &tauri::WebviewWindow) {
+        let _ = window.with_webview(|w| {
+            let Ok(env) = w.environment().cast::<ICoreWebView2Environment5>() else { return };
+            let handler = BrowserProcessExitedEventHandler::create(Box::new(|_, _| {
+                EXITED.store(true, Ordering::SeqCst);
+                Ok(())
+            }));
+            let mut token = 0i64;
+            if unsafe { env.add_BrowserProcessExited(&handler, &mut token) }.is_ok() {
+                WATCHING.store(true, Ordering::SeqCst);
+            }
+        });
+    }
+
+    /// True while the exit still has to wait for the browser process.
+    pub fn pending() -> bool {
+        WATCHING.load(Ordering::SeqCst) && !DONE.load(Ordering::SeqCst)
+    }
+
+    /// Closes every webview (the browser process only shuts down once none is left), then waits
+    /// for it to exit. Runs off the event loop, which must keep running to deliver the event.
+    pub fn wait(app: &AppHandle) {
+        for w in app.webview_windows().values() {
+            let _ = w.destroy();
+        }
+        let t0 = Instant::now();
+        while !EXITED.load(Ordering::SeqCst) && t0.elapsed() < LIMIT {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        DONE.store(true, Ordering::SeqCst);
+    }
+}
+#[cfg(not(windows))]
+mod storage_flush {
+    pub fn pending() -> bool {
+        false
+    }
+    pub fn wait(_: &tauri::AppHandle) {}
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -420,6 +479,10 @@ pub fn run() {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.
             let handle = app.handle().clone();
+            #[cfg(windows)]
+            if let Some(main) = app.get_webview_window("main") {
+                storage_flush::watch(&main);
+            }
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(2500));
                 if let Some(main) = handle.get_webview_window("main") {
@@ -450,16 +513,26 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Typewriter")
         .run(|app, event| {
-            // Before the process ends, let typing threads stop and restore the keymap.
-            // The exit is postponed (not blocked) and resumed once they are done.
+            // Before the process ends, let typing threads stop and restore the keymap, and (on
+            // Windows) let the webviews' storage reach the disk. The exit is postponed (not
+            // blocked) and resumed once they are done.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let state = app.state::<AppState>();
-                if !state.cleaned_up.load(std::sync::atomic::Ordering::SeqCst) && workers_running(app) {
+                let cleanup = !state.cleaned_up.load(Ordering::SeqCst) && workers_running(app);
+                let flush = storage_flush::pending();
+                if cleanup || flush {
                     api.prevent_exit();
+                    if state.exiting.swap(true, Ordering::SeqCst) {
+                        return; // already on its way out
+                    }
                     let h = app.clone();
                     std::thread::spawn(move || {
-                        finish_sessions(&h);
-                        h.state::<AppState>().cleaned_up.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if cleanup {
+                            finish_sessions(&h);
+                            h.state::<AppState>().cleaned_up.store(true, Ordering::SeqCst);
+                        }
+                        storage_flush::wait(&h);
+                        h.state::<AppState>().exiting.store(false, Ordering::SeqCst);
                         h.exit(0);
                     });
                 }

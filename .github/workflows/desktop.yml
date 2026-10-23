@@ -116,8 +116,12 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
           if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
+          # v1.2.0 loses changes made in the last seconds before closing (fixed in this build), so
+          # it gets 10 s to save them; the control below then shows they were really on disk.
+          $env:SETTLE_MS = "10000"
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
+          $env:SETTLE_MS = ""
           # Control: the previous version, reopened, really kept them (so a loss below is the upgrade's).
           node e2e-desktop/upgrade.mjs check $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "the previous version itself did not keep the settings" }
@@ -134,6 +138,12 @@ jobs:
           "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
       - name: The settings saved in v1.2.0 survived the upgrade
         run: node e2e-desktop/upgrade.mjs after "$env:TW_EXE" upgrade-state.json
+      - name: Settings changed just before closing are kept (the new app is closed at once, then reopened)
+        run: |
+          node e2e-desktop/upgrade.mjs before "$env:TW_EXE" close-state.json
+          if ($LASTEXITCODE -ne 0) { throw "could not change settings in the new version" }
+          node e2e-desktop/upgrade.mjs check "$env:TW_EXE" close-state.json
+          if ($LASTEXITCODE -ne 0) { throw "settings changed just before closing were lost" }
       - name: Build the Chrome extension (for the Opera check)
         run: npx vite build -c vite.extension.config.ts
       - name: Install Opera (best effort; Chrome and Edge are preinstalled)
