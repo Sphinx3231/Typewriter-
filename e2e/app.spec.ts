@@ -23,6 +23,10 @@ async function setDuration(page: Page, minutes: number, seconds: number) {
   await sec.fill(String(seconds));
   await sec.press("Enter");
   await sec.blur();
+  // The duration really took effect (a run that kept a longer one would otherwise only show up as a timeout later).
+  await expect(page.getByRole("radio", { name: "Total duration" })).toHaveAttribute("aria-checked", "true");
+  await expect(min).toHaveValue(String(minutes));
+  await expect(sec).toHaveValue(String(seconds));
 }
 
 async function setWpm(page: Page, wpm: number) {

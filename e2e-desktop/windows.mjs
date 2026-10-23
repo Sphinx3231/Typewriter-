@@ -733,7 +733,11 @@ async function main() {
     const run = async () => {
       await clear("doc");
       await start();
+      // The status window can still show the previous session's "completed" for a moment; wait
+      // for the new session first so its end is not mistaken for this one's.
+      await until(async () => (await hudPhase()) !== "completed", 15000, "the new session to begin");
       await clickInto("doc");
+      await until(async () => (await hudPhase()) === "typing", 15000, "typing to begin");
       await until(async () => (await hudPhase()) === "completed", 90000, "the session to complete");
       await sleep(500);
       return read("doc");

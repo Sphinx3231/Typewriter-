@@ -1,11 +1,40 @@
 # Status
 
-_Last updated: 2026-10-20 (1.2.0 + Smart Humanization + Humanization Studio on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-23 (1.2.0 + Smart Humanization + Humanization Studio on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## Installers with the Humanization Studio (2026-10-23, local build, not merged, not released)
+
+Built with the project's own process (`npx tauri build`, as in `.github/workflows/desktop.yml`), from `4d5e742` plus the changes below. Version 1.2.0, identifier `app.typewriter.desktop`.
+
+Fixed while packaging:
+- **The sidebar said "v1.1" in the 1.2.0 app** (hard-coded in `App.tsx`). It now shows the version from `package.json`, like Settings › About; a unit test checks it.
+- **Windows harness race (run 35, 17/18):** the Smart Humanization check read the document before typing, because the status window still showed the previous session's "completed". It now waits for the new session, then for typing, then for completion. The Linux harness had the same pattern (a stale "Sent"); fixed the same way.
+- **A rare Playwright failure** (1 of 344 runs: "the switch is locked while typing" saw "Typing" for 15 s on a 6 s session). Not reproduced in 80 more runs (40 under full CPU load) or in 40,000 seeds of the playback engine; the likeliest cause is a duration that didn't take effect. `setDuration` now checks that the mode, minutes and seconds really took effect, so a repeat fails there with a clear message instead of a timeout.
+
+New checks:
+- **Packaged-app large documents** (`e2e-desktop/run.mjs`): a 500,004-character single paragraph and a 471,200-character, 800-paragraph essay in the installed app. Each is humanized automatically and the Studio shows every change. **Copy revised** (pressed with a real key press, since the webview only lets a user gesture write to the clipboard) gives exactly the engine's humanized text. Restoring the 3rd change gives exactly that mix, and undoing the restore gives the humanized text back. Then a 10-paragraph humanized document with one change restored is typed into another app, exactly. The expected texts come from the app's own humanizer, bundled from source by the harness; every observed text comes from the packaged app.
+- **Upgrade keeps settings** (`e2e-desktop/upgrade.mjs`): settings are changed and saved in the installed old version, the new version is installed over it, and every saved key and field must survive, with the UI showing the same choices.
+- **Windows CI** (`desktop.yml`, not yet run, needs a push): the Windows end-to-end job now installs the exact `setup.exe` the build job uploads (before, it rebuilt its own copy, so the downloadable file itself was never installed). It first installs the published v1.2.0 pre-release and saves settings in it, then upgrades and checks them. The build job prints each installer's SHA-256.
+
+Local installers (Linux container; `src-tauri/target/release/bundle/`):
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `deb/Typewriter_1.2.0_amd64.deb` | 3,531,752 | `283f342d8063b33f7752a2a937b0a09fe197022ebeb4d6d292dd535960efe765` |
+| `rpm/Typewriter-1.2.0-1.x86_64.rpm` | 3,538,361 | `a49892041c2fec7ad45f7c0999543fee682d343a3745c463ce20c7e6c04af4ad` |
+| `appimage/Typewriter_1.2.0_amd64.AppImage` | 82,381,304 | `37e581b2c49a69a7bd371850db8496a888f5e1d847c1898ffbb0bca25c4d8fb5` |
+
+Tests run (2026-10-23):
+- Lint/typecheck clean. Unit + integration (Vitest, coverage): **816 passed**, 0 failed (99.68% statements, 98.63% branches, 99.85% functions, 100% lines). Playwright: **43 passed**, 0 failed (in 7 full runs before the duration assertion only that one rare failure; 43/43 after it).
+- `.deb`: v1.1.0 installed, settings changed and saved in it, then the 1.2.0 `.deb` installed over it with dpkg: all 4 stored keys and every field kept, same choices shown (**PASS**, run twice). The installed `/usr/bin/typewriter` is byte-identical to the packaged one. Full desktop suite against it: **26 passed, 0 failed** (an earlier full run had 25/26: the large-document check's second **Copy revised** got no answer within 20 s; it then passed 6 of 6 times, alone, after the check before it, and in the final full run. The harness now prints where the key press went if it happens again).
+- Large documents in the installed app: 500,004-character paragraph, Studio shows 34,883 changes after 2–4 s, then the page is busy for up to about 4 s while it lays out every highlight; restoring one change 0.5–1.1 s. 471,200-character essay: 7,999 changes after 4–5 s; restoring one change about 0.4 s. All texts exact.
+- AppImage: launch, tricky text, Smart Humanization, large documents and emergency stop: **5 passed**. `.rpm`: digests OK, files verified in a scratch root, its binary passed launch and Smart Humanization: **2 passed**. Not installed on Fedora/openSUSE.
+- **Windows: not built or installed here.** NSIS installers are built on Windows; the established process is the `Desktop builds` workflow. This container has no Windows and can't download CI artifacts. The workflow changes above need a push and a run.
 
 ## Humanization Studio (2026-10-20, not merged, not in the v1.2.0 release)
 

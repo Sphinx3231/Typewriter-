@@ -53,6 +53,14 @@ jobs:
         run: cargo test --manifest-path src-tauri/native/Cargo.toml --test session
       - name: Build installers
         run: npx tauri build ${{ matrix.bundles }}
+      - name: Installer checksums (SHA-256 of the files uploaded below)
+        shell: bash
+        run: >-
+          node -e "const fs = require('fs'), path = require('path'), crypto = require('crypto');
+          const root = 'src-tauri/target/release/bundle';
+          for (const d of fs.readdirSync(root)) for (const f of fs.readdirSync(path.join(root, d)))
+          if (/\\.(deb|rpm|AppImage|dmg)$|-setup\\.exe$/.test(f)) { const p = path.join(root, d, f);
+          console.log(crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'), fs.statSync(p).size, p); }"
       - uses: actions/upload-artifact@v4
         with:
           name: typewriter-${{ matrix.name }}
@@ -68,7 +76,10 @@ jobs:
   # real key events, the status window, pause/resume, focus loss and the emergency stop.
   # Windows Server 2022: on the 2025 image (windows-latest) Microsoft Edge WebDriver can't
   # start any WebView2 app (actions/runner-images#14738), so no session is ever created.
+  # It installs the very setup.exe the build job uploaded (the file users download), first as an
+  # upgrade over the published v1.2.0 pre-release.
   windows-e2e:
+    needs: build
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -82,24 +93,44 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Build the Windows installer (the packaged app, as users get it)
-        run: npx tauri build --bundles nsis
-      - name: Install the packaged app silently and find it
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          "installer: $($setup.Name)"
-          Start-Process $setup.FullName -ArgumentList '/S' -Wait
-          $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter", "$env:LOCALAPPDATA\Programs", "$env:ProgramFiles\Typewriter" -Recurse -Filter typewriter.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { throw "the installed typewriter.exe wasn't found" }
-          "installed: $($exe.FullName)"
-          "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+      - name: The setup.exe from the build job (the downloadable file)
+        uses: actions/download-artifact@v4
+        with:
+          name: typewriter-windows
+          path: installer
       - name: Install tauri-driver and a matching msedgedriver
         run: |
           cargo install tauri-driver --locked
           cargo install --git https://github.com/chippers/msedgedriver-tool
           & "$HOME/.cargo/bin/msedgedriver-tool.exe"
           $PWD.Path >> $env:GITHUB_PATH
+      - name: Install the published v1.2.0 first (the version users have now) and save settings in it
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.2.0 --repo "$env:GITHUB_REPOSITORY" --pattern '*-setup.exe' --dir previous
+          $old = Get-ChildItem previous/*-setup.exe | Select-Object -First 1
+          "previous installer: $($old.Name) sha256 $((Get-FileHash $old.FullName -Algorithm SHA256).Hash)"
+          Start-Process $old.FullName -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
+          if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
+          "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
+          node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
+          if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
+      - name: Install the new setup.exe silently over it and find it
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem installer -Recurse -Filter *-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw "the build job uploaded no setup.exe" }
+          "installer: $($setup.Name) $($setup.Length) bytes sha256 $((Get-FileHash $setup.FullName -Algorithm SHA256).Hash)"
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter", "$env:LOCALAPPDATA\Programs", "$env:ProgramFiles\Typewriter" -Recurse -Filter typewriter.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "the installed typewriter.exe wasn't found" }
+          "installed: $($exe.FullName) $($exe.LastWriteTime)"
+          "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+      - name: The settings saved in v1.2.0 survived the upgrade
+        run: node e2e-desktop/upgrade.mjs after "$env:TW_EXE" upgrade-state.json
       - name: Build the Chrome extension (for the Opera check)
         run: npx vite build -c vite.extension.config.ts
       - name: Install Opera (best effort; Chrome and Edge are preinstalled)

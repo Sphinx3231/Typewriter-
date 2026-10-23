@@ -1,5 +1,6 @@
 import { History, PenLine, Settings } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { APP_VERSION } from "./build";
 import { markReady } from "./ready";
 import { useSession } from "./state/useSession";
 import { useTheme } from "./theme/theme";
@@ -143,7 +144,7 @@ export default function App() {
         </nav>
         <div className="sidebar__foot">
           <p className="sidebar__tag">Type naturally. Write effortlessly.</p>
-          <p className="sidebar__meta">Runs on your device · v1.1</p>
+          <p className="sidebar__meta" data-testid="sidebar-version">Runs on your device · v{APP_VERSION}</p>
         </div>
       </aside>
 

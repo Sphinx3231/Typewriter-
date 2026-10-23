@@ -13,10 +13,10 @@
  * Needs: Xvfb, openbox, xdotool, tauri-driver, WebKitWebDriver (Linux).
  */
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -172,6 +172,22 @@ function boundKeysyms(chars) {
 }
 const editorText = () => ui(`document.getElementById("source-text").value`);
 
+/**
+ * The app's own humanizer and diff, bundled from the source, so the harness knows exactly what the
+ * packaged app must produce for a large document. (Only the expected text comes from here; every
+ * observed text comes from the packaged app.)
+ */
+async function engine() {
+  const { build } = await import("rolldown");
+  const dir = mkdtempSync(join(tmpdir(), "tw-engine-"));
+  const src = (f) => JSON.stringify(join(here, "..", "src", "humanize", f));
+  writeFileSync(join(dir, "entry.ts"), `export { humanize } from ${src("index.ts")};\nexport { diffText, applyReverts } from ${src("diff.ts")};\n`);
+  await build({ input: join(dir, "entry.ts"), output: { file: join(dir, "engine.mjs"), format: "esm" }, logLevel: "silent" });
+  return import(pathToFileURL(join(dir, "engine.mjs")).href);
+}
+/** The X clipboard as the app left it. */
+const clipboard = () => execFileSync("xclip", ["-o", "-selection", "clipboard"], { env, maxBuffer: 64 << 20 }).toString();
+
 /** Runs a script in the status window (HUD), then switches WebDriver back to the main window. */
 async function inHud(script) {
   const main = await wd("GET", `/session/${sid}/window`);
@@ -201,6 +217,19 @@ async function clickHud(testid) {
   const id = await windowId("Typewriter status");
   const geo = Object.fromEntries(xdo("getwindowgeometry", "--shell", id).split("\n").map((l) => l.split("=")));
   xdo("mousemove", String(Math.round(Number(geo.X) + r.x)), String(Math.round(Number(geo.Y) + r.y)), "click", "1");
+  await sleep(150);
+}
+/**
+ * Presses a main-window button the way a keyboard user does: focus it, then a real Enter key press
+ * through X. Needed where the webview only allows an action on a real user gesture (writing to the
+ * clipboard); a scripted click is refused there.
+ */
+async function pressMain(testid) {
+  const ok = await ui(`(() => { const b = document.querySelector('[data-testid="${testid}"]'); if (!b) return false; b.scrollIntoView({ block: "center" }); b.focus(); return document.activeElement === b; })()`);
+  assert(ok, `could not focus the ${testid} control`);
+  xdo("windowactivate", "--sync", await mainWindow());
+  await sleep(200);
+  xdo("key", "--clearmodifiers", "Return");
   await sleep(150);
 }
 
@@ -443,6 +472,8 @@ async function main() {
     const run = async () => {
       await resetDoc();
       await ui(`(__tw.click("btn-start"), 1)`);
+      // The previous session's "Sent" must give way to this one before its end is awaited.
+      await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
       await sleep(300);
       await focusDoc();
       await until(async () => (await state()).status === "Sent", 40000, "completion");
@@ -521,6 +552,101 @@ async function main() {
     await sleep(300);
     got = await run();
     assert(got === ROBOTIC, `original differs:\n${JSON.stringify(got)}`);
+  });
+
+  await check("large documents: a 500,000-character paragraph and an 800-paragraph essay are humanized, highlighted and restorable; the prepared text is exact; a long humanized document is typed exactly", async () => {
+    const { humanize, diffText, applyReverts } = await engine();
+    const { ROBOTIC } = FIXTURES;
+    const studio = () =>
+      ui(`(() => { const q = (t) => document.querySelector('[data-testid="' + t + '"]');
+        return { headline: q("humanize-headline")?.textContent, summary: q("studio-summary")?.textContent, pos: q("studio-pos")?.textContent, note: q("studio-note")?.textContent }; })()`);
+    const copyRevised = async () => {
+      // xclip stays behind to serve the selection: it must not hold on to our output pipes.
+      execFileSync("xclip", ["-i", "-selection", "clipboard"], { env, input: "(empty)", stdio: ["pipe", "ignore", "ignore"] });
+      await pressMain("studio-copy-revised");
+      await until(async () => /Copied the revised text/.test((await studio()).note ?? ""), 20000, "Copy revised").catch(async (e) => {
+        const where = await ui(`({ focused: document.activeElement && (document.activeElement.dataset.testid || document.activeElement.tagName), pageHasFocus: document.hasFocus() })`);
+        let active = "?";
+        try { active = xdo("getwindowname", xdo("getactivewindow")); } catch {}
+        throw new Error(`${e.message}; the Studio says ${JSON.stringify((await studio()).note)}; focus ${JSON.stringify(where)}; active X window ${JSON.stringify(active)}`);
+      });
+      return clipboard();
+    };
+    const fmt = (n) => n.toLocaleString("en-US");
+    for (const [name, text] of [
+      ["single paragraph", "Moreover, we utilize it in order to learn. ".repeat(11_628)],
+      ["800 paragraphs", (ROBOTIC + "\n\n").repeat(800)],
+    ]) {
+      const want = humanize(text);
+      assert(want.status === "humanized", `${name}: the engine did not humanize it`);
+      const d = diffText(want.source, want.output);
+      await prepare("", { seconds: 30, mistakes: "Off", countdown: 2 });
+      await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+      const t0 = Date.now();
+      await ui(`(__tw.setText(${JSON.stringify(text)}), 1)`);
+      // Smart Humanization runs on its own; the Studio shows every change.
+      const want0 = `${d.changes.length === 1 ? "1 change" : fmt(d.changes.length) + " changes"}`;
+      await until(async () => (await studio()).summary?.startsWith(want0), 60000, `the Studio to show ${want0}`);
+      const took = ((Date.now() - t0) / 1000).toFixed(1);
+      // The page may still be laying out every highlight; then it must answer promptly again (no lasting freeze).
+      let r0 = Date.now();
+      await ui(`1`);
+      const busy = Date.now() - r0;
+      r0 = Date.now();
+      await ui(`1`);
+      const rt = Date.now() - r0;
+      const s = await studio();
+      console.log(`    ${name}: ${fmt(text.length)} characters, "${s.headline}", Studio "${s.summary.split("·")[0].trim()}" after ${took} s; busy for ${busy} ms after that, then a UI round trip takes ${rt} ms`);
+      assert(s.headline === "Humanized automatically", `${name}: headline ${JSON.stringify(s.headline)}`);
+      assert(busy < 15000 && rt < 1000, `${name}: the UI is slow to answer (${busy} ms, then ${rt} ms)`);
+      // The prepared text is exactly the humanized copy; the original in the editor is untouched.
+      let got = await copyRevised();
+      assert(got === want.output, `${name}: the prepared text differs from the humanized copy (${got.length} vs ${want.output.length} characters)`);
+      assert((await editorText()) === text, `${name}: the original in the editor changed`);
+      // Restore one change deep inside the document: the 3rd change, then the last one.
+      await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), __tw.click("studio-next"), 1)`);
+      await until(async () => /^Change 3 of/.test((await studio()).pos ?? ""), 10000, "change 3 selected");
+      let a0 = Date.now();
+      await ui(`(__tw.click("studio-revert"), 1)`);
+      await ui(`1`);
+      console.log(`    ${name}: restoring one change took ${Date.now() - a0} ms`);
+      await sleep(500);
+      got = await copyRevised();
+      const one = applyReverts(d, new Set([2]));
+      assert(got === one, `${name}: with change 3 kept as original the prepared text differs`);
+      assert(got !== want.output, `${name}: restoring change 3 changed nothing`);
+      // Restore it again (undo), then everything is the humanized copy once more.
+      await ui(`(__tw.click("studio-revert"), 1)`);
+      await sleep(500);
+      assert((await copyRevised()) === want.output, `${name}: undoing the restore did not give back the humanized copy`);
+      await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+      await sleep(500);
+    }
+
+    // Typed for real: a long humanized document (ten paragraphs), with one change kept as original.
+    const doc = (ROBOTIC + "\n\n").repeat(10).trimEnd();
+    const want = humanize(doc);
+    const d = diffText(want.source, want.output);
+    const expected = applyReverts(d, new Set([1]));
+    await prepare(doc, { seconds: 75, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+    await until(async () => (await studio()).headline === "Humanized automatically", 10000, "automatic humanization");
+    await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), 1)`);
+    await until(async () => /^Change 2 of/.test((await studio()).pos ?? ""), 5000, "change 2 selected");
+    await ui(`(__tw.click("studio-revert"), 1)`);
+    await sleep(300);
+    await resetDoc();
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 120000, "completion");
+    const got = await docValue();
+    console.log(`    typed ${fmt(got.length)} characters of a ${fmt(doc.length)}-character humanized document (one change kept as original)`);
+    assert(got === expected, `typed text differs from the prepared text:\n${JSON.stringify(got.slice(0, 300))}\nexpected\n${JSON.stringify(expected.slice(0, 300))}`);
+    assert((await editorText()) === doc, "the original in the editor changed");
+    await ensureIdle();
+    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
   });
 
   await check("Caps Lock left on doesn't change the case of what's typed", async () => {

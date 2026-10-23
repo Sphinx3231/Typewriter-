@@ -66,6 +66,12 @@ describe("App (browser preview)", () => {
     expect(screen.getByTestId("studio-revised-text").textContent).toBe(ROBOTIC_HUMANIZED);
   });
 
+  it("shows the version being run in the sidebar (from package.json, never a hard-coded one)", async () => {
+    const { version } = (await import("../package.json")).default;
+    renderApp();
+    expect(screen.getByTestId("sidebar-version").textContent).toBe(`Runs on your device · v${version}`);
+  });
+
   it("shows the empty state and refuses to start without text", () => {
     renderApp();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workspace");
