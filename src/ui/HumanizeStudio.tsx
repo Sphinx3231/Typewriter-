@@ -120,7 +120,10 @@ export function HumanizeStudio({ session }: { session: Session }) {
   const [onlyChanges, setOnlyChanges] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [listed, setListed] = useState(LIST_PAGE);
-  const [note, setNote] = useState("");
+  // A new object each time, so the same message twice in a row (two copies within 4 s) restarts
+  // the 4-second display instead of being cleared by the first one's timer.
+  const [note, setNoteState] = useState<{ text: string } | null>(null);
+  const setNote = (text: string) => setNoteState({ text });
   const body = useRef<HTMLDivElement>(null);
 
   // A new result means new changes: start over.
@@ -130,7 +133,7 @@ export function HumanizeStudio({ session }: { session: Session }) {
   }, [d]);
   useEffect(() => {
     if (!note) return;
-    const id = setTimeout(() => setNote(""), 4000);
+    const id = setTimeout(() => setNoteState(null), 4000);
     return () => clearTimeout(id);
   }, [note]);
 
@@ -379,7 +382,7 @@ export function HumanizeStudio({ session }: { session: Session }) {
           </Button>
         )}
         <span className="studio__note" role="status" data-testid="studio-note">
-          {note}
+          {note?.text}
         </span>
       </div>
     </section>

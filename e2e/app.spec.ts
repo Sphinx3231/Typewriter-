@@ -18,11 +18,15 @@ async function setDuration(page: Page, minutes: number, seconds: number) {
   await page.getByRole("radio", { name: "Total duration" }).click();
   const min = page.getByRole("spinbutton", { name: "Minutes", exact: true });
   const sec = page.getByRole("spinbutton", { name: "Seconds", exact: true });
-  await min.fill(String(minutes));
-  await min.press("Enter");
+  // Seconds first: committing the minutes first (say 2:00 → 0) makes the duration 0:01, and React
+  // re-renders Seconds as "1" a moment later. If that lands between Playwright's select-all and
+  // its typing, "4" becomes "14" (seen 3 times in 600 runs). This way neither field changes while
+  // the other is being edited.
   await sec.fill(String(seconds));
   await sec.press("Enter");
-  await sec.blur();
+  await min.fill(String(minutes));
+  await min.press("Enter");
+  await min.blur();
   // The duration really took effect (a run that kept a longer one would otherwise only show up as a timeout later).
   await expect(page.getByRole("radio", { name: "Total duration" })).toHaveAttribute("aria-checked", "true");
   await expect(min).toHaveValue(String(minutes));
@@ -518,7 +522,7 @@ test.describe("Humanization Studio", () => {
     await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
     const studio = page.getByTestId("studio");
     await expect(studio).toBeVisible();
-    await expect(page.getByTestId("studio-summary")).toHaveText("9 changes · 26 words changed · 5 sentences adjusted (26 removed, 7 added)");
+    await expect(page.getByTestId("studio-summary")).toHaveText("9 changes · 27 words changed · 5 sentences adjusted (27 removed, 8 added)");
     await expect(studio.locator("button[data-change]")).toHaveCount(9);
 
     // Real styling: reworded text is underlined, removed text struck through (not color alone).
@@ -583,6 +587,31 @@ test.describe("Humanization Studio", () => {
     await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
     expect(await output(page)).toBe(ROBOTIC);
     await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
+  });
+
+  test("SlopMonster's checks: listed and marked in the style checks, its edits explained, the result typed exactly", async ({ page }) => {
+    const { STYLED } = await import("../src/humanize/calibration");
+    const { humanize } = await import("../src/humanize");
+    const want = humanize(STYLED.essay).output;
+    await setDuration(page, 0, 4);
+    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+    await setText(page, STYLED.essay);
+    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
+    await expect(page.getByTestId("humanize-status")).toContainText("60% (6 of 10 style checks flagged)");
+    await page.getByText("Style checks", { exact: true }).click();
+    const checks = page.getByTestId("humanize-checks");
+    await expect(checks.locator("li")).toHaveCount(13);
+    await expect(checks.locator('li[data-check="buzzwords"]')).toContainText("Overused buzzwordsSlopMonster: flagged");
+    await expect(checks.locator('li[data-check="stock-phrases"]')).toContainText("the 'not just X, but Y' construction");
+    await expect(checks.locator('li[data-check="rule-of-three"]')).toContainText('"curiosity, independence, and confidence"');
+    await expect(checks.locator('li[data-check="numeric-claims"]')).toContainText("nothing to note");
+    // The "leverage" → "use" edit is selected and explained as SlopMonster's.
+    const change = page.getByTestId("studio").locator('button[data-change][aria-label="Reworded: “leverage” to “use”."]');
+    await change.click();
+    await expect(page.getByTestId("studio-reason")).toHaveText("Replaced a buzzword with a plain word (SlopMonster vocabulary list).");
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(want);
   });
 
   test("both themes: highlights use each theme's own colors and stay readable; screenshots", async ({ page }) => {

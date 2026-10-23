@@ -72,8 +72,10 @@ When the user turns Smart Humanization on:
   - overly formal or wordy phrasing;
   - repetitive sentence structure;
   - vague statements;
-  - a mismatch with the chosen tone.
-- Score = flagged applicable checks ÷ applicable checks × 100. Only applicable checks count. Text too short to judge, or with no applicable check, has no score and is left unchanged.
+  - a mismatch with the chosen tone;
+  - from SlopMonster's checker (added 2026-10-23, see `docs/SLOPMONSTER.md`): overused buzzwords (2 or more), stock phrases and constructions such as "not just X, but Y" (2 or more), and tidy lists of three (at least one per 150 words). Words and phrases one of the checks above already counts are not counted again.
+- Two more SlopMonster findings are shown as notes and never scored: dash, hyphen and semicolon habits, and numbers next to a claim ("10,000+ happy customers") to double-check.
+- Score = flagged applicable checks ÷ applicable checks × 100. Only applicable checks count; notes never do. Text too short to judge, or with no applicable check, has no score and is left unchanged.
 - At 50% or more (exactly 50% included), a minimal rule-based rewrite prepares a lightly edited copy. Below 50%, the text is left unchanged. No confirmation is asked.
 - The rewrite must preserve:
   - meaning, facts, names and numbers;
@@ -84,6 +86,7 @@ When the user turns Smart Humanization on:
 - The original is immutable. The rewrite is always derived from the original, never from a previous rewrite. The user can inspect both and type the original instead.
 - The final output must equal the prepared text exactly, character for character. Text is never changed during a running session.
 - It runs entirely on the device: no model, no network (CLAUDE.md rule 2).
+- SlopMonster's own rewriting step sends text to an AI model, so it is not used. Its editing guidance is applied only as fixed local rules where the shorter wording means the same in any context: throat-clearing openers ("Here's the thing:", "The truth is,"), stacked hedges ("may potentially"), padding ("very unique", "more than just"), "leverage" used as a verb and "harness the power of". Everything else it finds is reported in the checklist for the writer to judge.
 
 ## 2b. Humanization Studio (added 2026-10-20)
 
@@ -94,7 +97,7 @@ After an automatic rewrite, the Studio shows what changed. It is a presentation 
 - The Studio is its own panel below the editor and playback (in windows from 1025 to 1260 px wide, below Settings, so it has the full width). The status line under the editor keeps the score and has **Review the changes**, which scrolls to the Studio. Side by side shows the two texts next to each other when the window is wider than 640 px and stacks them below that, with no horizontal scrolling.
 - Added or reworded text is underlined, removed text is struck through, punctuation and spacing changes are boxed, and kept-original changes have a dashed line. Colors come from the theme (light: blue and purple; dark: orange and red), and every highlight also has a text label for screen readers.
 - The summary (changes, words changed, sentences adjusted, words removed and added) is counted from the diff.
-- Selecting a change explains it. An explanation names a rule only when one of the rewrite's recorded edits really occurs over that spot in the original. Otherwise it says "Wording adjusted for flow", "Punctuation adjusted", "Spacing or line breaks adjusted" or "Capitalization adjusted".
+- Selecting a change explains it. An explanation names a rule only when one of the rewrite's recorded edits really occurs over that spot in the original; rules taken from SlopMonster say so. Otherwise it says "Wording adjusted for flow", "Punctuation adjusted", "Spacing or line breaks adjusted" or "Capitalization adjusted".
 - Controls:
   - highlights on/off;
   - all text / changes only;

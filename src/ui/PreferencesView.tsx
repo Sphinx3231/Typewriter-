@@ -6,6 +6,7 @@ import type { ThemePreference } from "../theme/theme";
 import { Button, ConfirmButton, Field, Segmented, Switch, useToast } from "./controls";
 import { LogoMark } from "./Logo";
 import { APP_COMMIT, APP_VERSION } from "../build";
+import { SLOPMONSTER_LICENSE } from "../humanize/slopmonster/license";
 import { isDesktop } from "../platform";
 
 const SHORTCUTS: [string, string][] = [
@@ -187,6 +188,13 @@ export function PreferencesView({
           <p className="panel__sub" data-testid="build-id">
             Build {APP_COMMIT}
           </p>
+          <details className="prefs__notices" data-testid="notices">
+            <summary>Open-source notices</summary>
+            <p className="panel__sub">
+              Some of the style checks come from SlopMonster by Jack Roberts (github.com/ItsssssJack/SlopMonster), ported to run inside Typewriter. Its license:
+            </p>
+            <pre className="prefs__license">{SLOPMONSTER_LICENSE}</pre>
+          </details>
           {install ? (
             <p className="panel__sub prefs__path" data-testid="install-path">
               Running from {install.exe}

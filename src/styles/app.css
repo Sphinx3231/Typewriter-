@@ -2027,6 +2027,33 @@ fieldset:disabled .segmented__opt {
 .humanize__checks li.is-flagged svg {
   color: var(--warning);
 }
+.humanize__checks li > svg {
+  flex: none;
+}
+.prefs__notices {
+  margin-top: 8px;
+}
+.prefs__notices summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.prefs__license {
+  margin: 6px 0 0;
+  max-width: 72ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+.humanize__src {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 .humanize__evidence {
   color: var(--text-muted);
   overflow-wrap: anywhere;

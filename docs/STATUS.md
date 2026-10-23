@@ -1,11 +1,44 @@
 # Status
 
-_Last updated: 2026-10-23 (1.2.0 + Smart Humanization + Humanization Studio on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-23 (1.2.0 + Smart Humanization + Humanization Studio + SlopMonster checks on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## SlopMonster's checks in the Humanization Studio (2026-10-23, not merged, not released)
+
+SlopMonster (github.com/ItsssssJack/SlopMonster, MIT, Jack Roberts) is the project in the reference video. Audit, what was integrated and why, calibration and verification: [`SLOPMONSTER.md`](SLOPMONSTER.md).
+
+- **Integrated:** its checker (`deslop.py`), ported rule for rule to TypeScript (`src/humanize/slopmonster/`). In the checklist it adds three scored checks (overused buzzwords, stock phrases and constructions, tidy lists of three) and two notes that are never scored (dash, hyphen and semicolon habits; numbers to double-check). Each is marked "SlopMonster" in Style checks. Its MIT notice is in Preferences › About › Open-source notices.
+- **Rewrite rules from its editing guidance** (local, fixed): "Here's the thing:" and "The truth is," openers, stacked hedges, "very unique", "quite literally", "more than just", "leverage" as a verb → "use", "harness the power of" → "use". The Studio explains each one as SlopMonster's.
+- **Not integrated:** its rewriter (`cleanse.sh`) sends the text to an AI model. Typewriter has no AI and no network, so it is left out. The video presents it as part of the tool.
+- **Unchanged:** the 50% threshold, the score formula, exact typing of the prepared text, the original never changing, per-change restore, themes and layout.
+- **Diff fix found on the way:** three changes in a row ("Furthermore, teachers leverage numerous" → "Teachers use many") were split at the wrong spaces, so restoring one gave "Teachers teachers many". The re-split pass now also tries the last two changes together.
+- **Rules dropped after review:** "help you to" → "help you" ("helps you to your seat"), "Let's break it down." and "Here's the thing." / "Here's the thing," (literal or continuing uses). These are now reported only.
+- **Playwright helper race:** `setDuration` sometimes left 14 s instead of 4 s (3 times in 600 runs). The duration assertion caught it. Fixed by setting seconds before minutes (details in `e2e/app.spec.ts`).
+- **The Studio's "Copied" note could vanish early (app bug):** a second copy within 4 s of the first got no fresh confirmation (same text, so React skipped the update, and the first copy's timer cleared it). This is what made the packaged-app large-document check's **Copy revised** time out now and then (25/26 earlier, 26/27 today). Each note now restarts its own 4 s; a unit test fails without the fix and passes with it.
+
+Tests run (2026-10-23, this change):
+- Lint/typecheck clean. Unit + integration (Vitest, coverage): **848 passed**, 0 failed (99.7% statements, 98.66% branches, 99.85% functions, 100% lines). New tests include:
+  - parity with SlopMonster's own Python on 152 inputs, plus its ported rule tests;
+  - calibration;
+  - integration (checks, rules, explanations, per-change restore, CRLF/emoji/tabs, no network APIs);
+  - the three-change diff split.
+- Upstream's own suite (`python3 tools/test_deslop.py`) passes on the audited commit.
+- Playwright: **44 passed**, 0 failed, in each of the last 3 full runs. The two affected Studio tests also passed 60 of 60 repeats.
+- Installed `.deb` (binary identical to the packaged one), full desktop suite: **27 passed, 0 failed, twice in a row**, including "SlopMonster's checks in the packaged app". The run before the note fix had 26/27, failing on the copy note above.
+- AppImage (launch, tricky text, Smart Humanization, SlopMonster, large documents, emergency stop): **6 passed**, 0 failed.
+
+Local installers with SlopMonster's checks (`src-tauri/target/release/bundle/`, version 1.2.0):
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `deb/Typewriter_1.2.0_amd64.deb` | 3,536,128 | `f3f0026380991ed0e56396ef9b385370caec7a5c5521aecc7d0c58e3b447fd5c` |
+| `rpm/Typewriter-1.2.0-1.x86_64.rpm` | 3,542,083 | `99baf3107496bba51e1b60ad72db5d2f3f67683d67222e0540b30d3c8272f5e9` |
+| `appimage/Typewriter_1.2.0_amd64.AppImage` | 82,385,400 | `6ceb32f552d777c0e4311e628c4325458e3f77acd102496487fc8bef2de57511` |
+- Windows: not run yet. It needs a push, which needs approval.
 
 ## Installers with the Humanization Studio (2026-10-23, local build, not merged, not released)
 
@@ -37,6 +70,7 @@ Tests run (2026-10-23):
 - **Windows: not built or installed here.** NSIS installers are built on Windows; the established process is the `Desktop builds` workflow. This container has no Windows and can't download CI artifacts.
 - **Windows run 36** (`d9d8eb7`, build only, no release): all three builds passed. The installer is `Typewriter_1.2.0_x64-setup.exe`, 2,842,695 bytes, SHA-256 `7249b1f1687dcb0ce692ad3be2af1aeb124d364b4a89e2ba08f1b5a7476d334b`, artifact `typewriter-windows`. The Windows job installed the published v1.2.0 and saved settings in it, then installed this file over it silently. **The upgrade check failed**: `typewriter:prefs` and `typewriter:history` were kept, but `typewriter:settings` and `typewriter:theme` were missing (the UI showed defaults). The rest of the Windows end-to-end run was skipped. The lost keys are exactly the two written about 1 s before the harness ended its WebDriver session, which kills the app process; WebView2 writes localStorage to disk lazily. So this is probably a write that was never flushed, not the installer deleting data, but that was not proven. The check now closes the app like a user (the title bar's X) and waits for it to exit, and first reopens the old version as a control. Linux passes all three stages (1.1.0 → 1.2.0).
 - **Windows run 37** (`faf7a1a`): builds passed; the setup.exe is 2,842,290 bytes, SHA-256 `1d90ec371240074cb4192ed614904000f569995310e600c50ad0c3ed195644a5`. **The control failed, before any upgrade:** the published v1.2.0 was closed with the title bar's X (it exited by itself), then reopened. `typewriter:settings` and `typewriter:theme` were gone again; `prefs` and `history` were kept. So the loss is not the installer's. **It is a Windows bug in the app, already in the released v1.2.0:** settings changed shortly before closing the app are lost. The lost keys were written 1–2 s before closing; the kept ones about 10 s before. The likely cause (not yet proven) is that WebView2 commits localStorage to disk after a delay of a few seconds, and the app exits before that happens. Linux (WebKitGTK) is not affected. The Windows end-to-end suite never closed and reopened the app with fresh settings, so this was not caught before. **Fix (not yet verified on Windows):** before exiting, Typewriter now closes its webviews and waits for WebView2's `BrowserProcessExited` event, at most 6 s, so its browser process can finish writing storage (`storage_flush` in `src-tauri/src/lib.rs`; Windows only, same `webview2-com` version as Tauri's webview layer). The Windows job now gives v1.2.0 10 s before closing, which tests the timing cause, and then checks that the new app keeps settings changed just before an immediate close. On Linux, the rebuilt `.deb` keeps settings changed just before an immediate close (PASS), and the full desktop suite passed **26/26** (a first run had 23/26: the status window's Pause click timed out, and the next two checks failed after it; all three passed when re-run alone, and then the whole suite passed). The new setup.exe was not installed in run 37; in run 36 it installed silently and the installed app launched and showed its UI, but the end-to-end checks did not run.
+- **Windows run 38** (`1694f72`, the fix): all three builds and the native tests passed. **The control failed again, even with 10 s between the change and closing:** the published v1.2.0 kept `prefs` and `history` (written as it started) and lost `settings` and `theme` (written about 25 s after it started, 10 s before closing). So it is not a delay of a few seconds. This fits Chromium's page-storage rate limit: after one write to disk, the next one is held for up to about a minute, and it is written out only when the browser process shuts down cleanly, which v1.2.0 never waited for. The fix in `1694f72` waits for exactly that shutdown, but run 38 stopped before reaching it. **The new app's immediate-close check, the upgrade check and the Windows end-to-end suite did not run in run 38, so the fix is still unverified on Windows.** The control now gives v1.2.0 70 s before closing (`desktop.yml`), long enough for the held write, so the run can reach the new app's checks.
 
 ## Humanization Studio (2026-10-20, not merged, not in the v1.2.0 release)
 

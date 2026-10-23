@@ -745,6 +745,14 @@ async function main() {
     await configure(ROBOTIC, { seconds: 12, mistakes: "Medium" });
     await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
     await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+    // SlopMonster's checks are part of the installed app's checklist: five marked items, the
+    // numbers note for "30 million students", and its "leverage" → "use" edit in the copy.
+    const sm = JSON.parse(
+      await ui(`JSON.stringify([...document.querySelectorAll('[data-testid="humanize-checks"] li')].filter((li) => li.querySelector(".humanize__src")).map((li) => [li.dataset.check, li.className]))`),
+    );
+    const smWant = [["buzzwords", ""], ["stock-phrases", ""], ["rule-of-three", ""], ["punctuation-habits", ""], ["numeric-claims", "is-note"]];
+    assert(JSON.stringify(sm) === JSON.stringify(smWant), `SlopMonster checks: ${JSON.stringify(sm)}`);
+    assert(ROBOTIC_HUMANIZED.includes("Teachers use many platforms"), "fixture without the SlopMonster edit");
 
     // The Studio's side-by-side view in this webview: both texts next to each other (stacked only
     // below 640 px), inside the panel, and no horizontal scrolling.

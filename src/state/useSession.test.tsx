@@ -799,7 +799,6 @@ describe("useSession: Smart Humanization", () => {
   it("at exactly 50% on the real checklist, the rewrite is what is typed", () => {
     const { result } = setup();
     on(result);
-    act(() => void result.current.humanize.setTone("casual"));
     act(() => result.current.setText(AT_THRESHOLD));
     const r = result.current.humanize.result!;
     expect(r).toMatchObject({ status: "humanized", score: 50 });

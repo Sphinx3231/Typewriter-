@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, Check, LoaderCircle, Minus, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowDown, Check, Info, LoaderCircle, Minus, Sparkles } from "lucide-react";
 import type { HumanizeResult } from "../humanize";
 import type { TextDiff } from "../humanize/diff";
 import type { Session } from "../state/useSession";
@@ -71,12 +71,26 @@ export function HumanizeStatus({ session }: { session: Session }) {
             The score is a writing-style heuristic: flagged checks out of the checks that apply. It does not and cannot tell who, or what, wrote the text. It runs on this
             device; nothing is sent anywhere.
           </p>
+          <p className="humanize__note">
+            Checks marked SlopMonster come from the open-source SlopMonster checker (MIT), built into Typewriter. Notes point out something to look at and are not scored.
+          </p>
           <ul className="humanize__checks" data-testid="humanize-checks">
             {r.checks.map((c) => (
-              <li key={c.id} className={!c.applicable ? "is-na" : c.flagged ? "is-flagged" : ""}>
-                {!c.applicable ? <Minus size={13} aria-hidden="true" /> : c.flagged ? <AlertTriangle size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />}
+              <li key={c.id} className={!c.applicable ? "is-na" : c.flagged ? (c.advisory ? "is-note" : "is-flagged") : ""} data-check={c.id}>
+                {!c.applicable ? (
+                  <Minus size={13} aria-hidden="true" />
+                ) : c.flagged ? (
+                  c.advisory ? (
+                    <Info size={13} aria-hidden="true" />
+                  ) : (
+                    <AlertTriangle size={13} aria-hidden="true" />
+                  )
+                ) : (
+                  <Check size={13} aria-hidden="true" />
+                )}
                 <span>
-                  {c.label}: {!c.applicable ? "doesn't apply" : c.flagged ? "flagged" : "fine"}
+                  {c.label}
+                  {c.source === "slopmonster" ? <span className="humanize__src">SlopMonster</span> : null}: {!c.applicable ? "doesn't apply" : c.flagged ? (c.advisory ? "note, not scored" : "flagged") : c.advisory ? "nothing to note" : "fine"}
                   {c.evidence.length ? <span className="humanize__evidence"> ({c.evidence.join("; ")})</span> : null}
                 </span>
               </li>

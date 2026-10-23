@@ -43,12 +43,12 @@ describe("the score", () => {
 
 describe("humanize: the decision", () => {
   it("the real checklist (not rigged): a text at exactly 50% is rewritten, one flag fewer is not", () => {
-    const at = humanize(AT_THRESHOLD, "casual");
-    expect(at).toMatchObject({ status: "humanized", score: 50, flagged: 4, applicable: 8 });
+    const at = humanize(AT_THRESHOLD, "any");
+    expect(at).toMatchObject({ status: "humanized", score: 50, flagged: 5, applicable: 10 });
     expect(at.output).not.toBe(AT_THRESHOLD);
     expect(at.source).toBe(AT_THRESHOLD);
-    const below = humanize(BELOW_THRESHOLD, "casual");
-    expect(below).toMatchObject({ status: "no-change-needed", score: 38, flagged: 3, applicable: 8 });
+    const below = humanize(BELOW_THRESHOLD, "any");
+    expect(below).toMatchObject({ status: "no-change-needed", score: 40, flagged: 4, applicable: 10 });
     expect(below.output).toBe(BELOW_THRESHOLD);
   });
 
@@ -111,6 +111,7 @@ describe("humanize: real checks on real text", () => {
       ["utilize", "use"],
       ["commence", "start"],
       ["numerous", "many"],
+      ["leverage", "use"],
     ]);
   });
 

@@ -371,6 +371,10 @@ const RESPLIT_MAX_CUTS = 16;
  * per space, so the search is (spaces before × spaces after) set lookups, not a recount each time.
  */
 function resplit(prev: Run, gap: Run, next: Run): [Run, Run, Run] | null {
+  return resplitScored(prev, gap, next)?.runs ?? null;
+}
+
+function resplitScored(prev: Run, gap: Run, next: Run): { runs: [Run, Run, Run]; gain: number } | null {
   const before = prev.before + gap.before + next.before;
   const after = prev.after + gap.after + next.after;
   const cuts = (t: string) => Array.from(t.matchAll(/[ \t]+/g), (m) => [m.index!, m.index! + m[0].length]).filter(([s, e]) => s > 0 && e < t.length);
@@ -389,7 +393,8 @@ function resplit(prev: Run, gap: Run, next: Run): [Run, Run, Run] | null {
   const ha = ca.map((c) => halves(after, c));
   const now = [prev.before.length, prev.before.length + gap.before.length];
   const nowA = [prev.after.length, prev.after.length + gap.after.length];
-  let best = { b: now, a: nowA, score: rate(halves(before, now), halves(after, nowA)) };
+  const current = rate(halves(before, now), halves(after, nowA));
+  let best = { b: now, a: nowA, score: current };
   for (let i = 0; i < cb.length; i++)
     for (let j = 0; j < ca.length; j++) {
       if (before.slice(cb[i][0], cb[i][1]) !== after.slice(ca[j][0], ca[j][1])) continue;
@@ -398,11 +403,14 @@ function resplit(prev: Run, gap: Run, next: Run): [Run, Run, Run] | null {
     }
   if (best.b === now) return null;
   const space = before.slice(best.b[0], best.b[1]);
-  return [
-    { same: false, before: before.slice(0, best.b[0]), after: after.slice(0, best.a[0]) },
-    { same: true, before: space, after: space },
-    { same: false, before: before.slice(best.b[1]), after: after.slice(best.a[1]) },
-  ];
+  return {
+    runs: [
+      { same: false, before: before.slice(0, best.b[0]), after: after.slice(0, best.a[0]) },
+      { same: true, before: space, after: space },
+      { same: false, before: before.slice(best.b[1]), after: after.slice(best.a[1]) },
+    ],
+    gain: best.score - current,
+  };
 }
 
 export function diffText(original: string, revised: string): TextDiff {
@@ -443,11 +451,32 @@ export function diffText(original: string, revised: string): TextDiff {
   // share the most words ("… schools" → "Schools", "commence" → "start"). Any split is exact.
   // Only for edits of up to RESPLIT_MAX_CUTS spaces a side: the search compares every pair of
   // spaces, and longer edits (which the rewrite rules never make) keep Myers' split.
+  // Three changes in a row ("Furthermore," → "Teachers", "teachers" → "use", "leverage numerous"
+  // → "many") can need the last two taken together before the first split comes right
+  // ("Furthermore, teachers" → "Teachers", "leverage numerous" → "use many"); that is tried only
+  // when the two-change re-split finds nothing better.
+  const dropped = new Set<number>();
   for (let r = 1; r < joined.length - 1; r++) {
+    if (dropped.has(r) || dropped.has(r + 1)) continue;
     const [prev, gap, next] = [joined[r - 1], joined[r], joined[r + 1]];
     if (!(isGap(gap) && !prev.same && !next.same)) continue;
     const better = resplit(prev, gap, next);
-    if (better) [joined[r - 1], joined[r], joined[r + 1]] = better;
+    if (better) {
+      [joined[r - 1], joined[r], joined[r + 1]] = better;
+      continue;
+    }
+    const [gap2, third] = [joined[r + 2], joined[r + 3]];
+    if (!gap2 || !third || !isGap(gap2) || third.same) continue;
+    const wide = resplitScored(prev, gap, { same: false, before: next.before + gap2.before + third.before, after: next.after + gap2.after + third.after });
+    if (wide && wide.gain > 0) {
+      [joined[r - 1], joined[r], joined[r + 1]] = wide.runs;
+      dropped.add(r + 2).add(r + 3);
+    }
+  }
+  if (dropped.size) {
+    const kept = joined.filter((_, i) => !dropped.has(i));
+    joined.length = 0;
+    for (const run of kept) joined.push(run);
   }
   // Whitespace both sides share at a change's edges belongs to the unchanged text; then
   // neighbouring unchanged runs merge.
@@ -543,7 +572,14 @@ const RULE_REASONS: Record<string, string> = {
   "additive-transition": "Removed a repeated transition (an earlier sentence already opens with one)",
   filler: "Removed a phrase that announces a point instead of making it",
   "plain-words": "Simplified an unnecessarily formal expression",
+  // From SlopMonster's catalogue and editing guidance:
+  "throat-clearing": "Removed a throat-clearing opener that delays the point (SlopMonster)",
+  "stacked-hedge": "Removed a stacked hedge: one qualifier is enough (SlopMonster)",
+  intensifier: "Removed padding around a word that already says it (SlopMonster)",
+  buzzword: "Replaced a buzzword with a plain word (SlopMonster vocabulary list)",
 };
+/** Rules that remove the start of a sentence, so the next word gets a capital. */
+const CAPITALIZING = new Set(["generic-opener", "conclusion-marker", "additive-transition", "filler", "throat-clearing"]);
 export const FALLBACK_REASON = "Wording adjusted for flow";
 
 export interface Explanation {
@@ -598,7 +634,7 @@ export function explainer(original: string, edits: readonly Edit[]): (change: Ch
     }
     const rules = [...new Set(used.map((e) => e.rule))];
     const reasons = [...new Set(rules.map((r) => RULE_REASONS[r] ?? FALLBACK_REASON))];
-    const capitalized = used.some((e) => /^\p{Lu}/u.test(e.after) && e.rule !== "plain-words");
+    const capitalized = used.some((e) => /^\p{Lu}/u.test(e.after) && CAPITALIZING.has(e.rule));
     return { reason: reasons.join("; ") + (capitalized ? ", and capitalized the next word." : "."), rules };
   };
 }

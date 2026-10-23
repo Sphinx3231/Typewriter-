@@ -45,7 +45,7 @@ const pos = () => textOf("studio-pos");
 describe("Humanization Studio", () => {
   it("shows the final text with each change highlighted and labelled, and a summary counted from the diff", () => {
     setup();
-    expect(textOf("studio-summary")).toBe("9 changes · 26 words changed · 5 sentences adjusted (26 removed, 7 added)");
+    expect(textOf("studio-summary")).toBe("9 changes · 27 words changed · 5 sentences adjusted (27 removed, 8 added)");
     const marks = changeButtons();
     expect(marks).toHaveLength(9);
     expect(marks.map((b) => b.getAttribute("aria-label"))).toContain("Reworded: “utilize” to “use”.");
@@ -76,7 +76,7 @@ describe("Humanization Studio", () => {
       "utilize",
       "in order ",
       "Furthermore, teachers",
-      "numerous",
+      "leverage numerous",
       "in order ",
       "Additionally, it is important to note that schools",
       "commence",
@@ -226,6 +226,23 @@ describe("Humanization Studio", () => {
       await act(async () => fireEvent.click(screen.getByTestId("studio-copy-original")));
       expect(textOf("studio-note")).toBe("Copied the original text.");
       act(() => void vi.advanceTimersByTime(4000));
+      expect(textOf("studio-note")).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a second copy within 4 s shows its own confirmation for the full 4 s (the first one's timer doesn't clear it)", async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+      await act(async () => fireEvent.click(screen.getByTestId("studio-copy-revised")));
+      act(() => void vi.advanceTimersByTime(3000));
+      await act(async () => fireEvent.click(screen.getByTestId("studio-copy-revised")));
+      act(() => void vi.advanceTimersByTime(3000)); // 6 s after the first copy, 3 s after the second
+      expect(textOf("studio-note")).toBe("Copied the revised text.");
+      act(() => void vi.advanceTimersByTime(1000));
       expect(textOf("studio-note")).toBe("");
     } finally {
       vi.useRealTimers();

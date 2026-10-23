@@ -116,9 +116,12 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
           if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
-          # v1.2.0 loses changes made in the last seconds before closing (fixed in this build), so
-          # it gets 10 s to save them; the control below then shows they were really on disk.
-          $env:SETTLE_MS = "10000"
+          # v1.2.0 loses settings changed in about the last minute before closing (fixed in this
+          # build): WebView2 holds a page-storage write for up to a minute after the previous one
+          # and only writes it out when its browser process shuts down cleanly, which v1.2.0 did
+          # not wait for. Run 38 lost them even 10 s after the change. So the old version gets
+          # 70 s; the control below then shows they were really on disk before the upgrade.
+          $env:SETTLE_MS = "70000"
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
           $env:SETTLE_MS = ""

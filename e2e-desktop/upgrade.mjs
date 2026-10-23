@@ -79,7 +79,7 @@ try {
     if (!Object.keys(ls).length) throw new Error("nothing was saved");
     writeFileSync(stateFile, JSON.stringify({ ui: after, ls }, null, 1));
     // SETTLE_MS: give an old version time to save before it closes (on Windows, v1.2.0 loses
-    // changes made in the last seconds before closing). Without it, the app is closed at once.
+    // changes made in about the last minute before closing). Without it, the app is closed at once.
     const settle = Number(process.env.SETTLE_MS || 0);
     if (settle) await sleep(settle);
     console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}; closing ${settle ? `${settle} ms after the change` : "at once"}`);

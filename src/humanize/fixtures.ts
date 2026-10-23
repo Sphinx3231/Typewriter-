@@ -5,7 +5,7 @@ Additionally, it is important to note that schools commence new programs every y
 
 In conclusion, technology plays a crucial role in education and will continue to shape how 30 million students learn.`;
 
-export const ROBOTIC_HUMANIZED = `Technology plays a crucial role in education. Moreover, students use various digital tools to learn more effectively. Teachers leverage many platforms to facilitate learning for every student.
+export const ROBOTIC_HUMANIZED = `Technology plays a crucial role in education. Moreover, students use various digital tools to learn more effectively. Teachers use many platforms to facilitate learning for every student.
 
 Schools start new programs every year (Smith, 2021). Various studies show a wide range of benefits, as one teacher said, "Moreover, in order to grow, we adapt."
 
@@ -14,8 +14,10 @@ Technology plays a crucial role in education and will continue to shape how 30 m
 export const NATURAL = `My grandmother kept bees behind the shed for forty years. She never wore gloves, which terrified me as a kid. Every August we'd spin the frames by hand in her kitchen, and the whole house smelled like wax for a week. I still can't eat store-bought honey without thinking it tastes thin. Last spring I finally set up two hives of my own.`;
 
 /**
- * Scores exactly 50% on the real checklist with the casual tone (4 of 8 checks flagged:
- * transitions, generic intro, formal phrasing, tone), and 3 of 8 without its formal phrasing.
+ * Scores exactly 50% on the real checklist with any tone (5 of 10 checks flagged: transitions,
+ * generic intro, formal phrasing, and SlopMonster's buzzwords and lists of three), and 4 of 10
+ * without its list of three.
  */
-export const AT_THRESHOLD = `In today's fast-paced world, bees matter. Moreover, my grandmother kept bees. Furthermore, she utilized no gloves in order to work. ${NATURAL}`;
-export const BELOW_THRESHOLD = `Moreover, my grandmother kept bees. Furthermore, she utilized no gloves in order to work. ${NATURAL}`;
+const AT_HEAD = `In today's fast-paced world, bees matter. Moreover, my grandmother kept bees. Furthermore, she utilized no gloves in order to work. Her craft was effortless, a testament to her patience.`;
+export const AT_THRESHOLD = `${AT_HEAD} She was patient, careful, and fearless. ${NATURAL}`;
+export const BELOW_THRESHOLD = `${AT_HEAD} ${NATURAL}`;

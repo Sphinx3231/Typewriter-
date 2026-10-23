@@ -156,10 +156,15 @@ describe("PreferencesView", () => {
     expect([...rows[1].querySelectorAll("kbd")].map((k) => k.textContent)).toEqual(["Space"]);
   });
 
-  it("shows version and build, without the desktop-only diagnostics in a browser", () => {
+  it("shows version and build, without the desktop-only diagnostics in a browser", async () => {
     renderPrefs();
     expect(screen.getByRole("heading", { name: /^Typewriter / })).toBeTruthy();
     expect(screen.getByTestId("build-id").textContent).toMatch(/^Build \S+/);
+    // SlopMonster's MIT notice ships in the app, word for word.
+    const { readFileSync } = await import("node:fs");
+    const license = readFileSync("src/humanize/slopmonster/LICENSE", "utf8");
+    expect(screen.getByTestId("notices").querySelector("pre")!.textContent).toBe(license);
+    expect(screen.getByTestId("notices").textContent).toContain("SlopMonster by Jack Roberts");
     expect(screen.queryByTestId("copy-diagnostics")).toBeNull();
   });
 

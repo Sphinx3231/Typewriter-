@@ -181,7 +181,7 @@ async function engine() {
   const { build } = await import("rolldown");
   const dir = mkdtempSync(join(tmpdir(), "tw-engine-"));
   const src = (f) => JSON.stringify(join(here, "..", "src", "humanize", f));
-  writeFileSync(join(dir, "entry.ts"), `export { humanize } from ${src("index.ts")};\nexport { diffText, applyReverts } from ${src("diff.ts")};\n`);
+  writeFileSync(join(dir, "entry.ts"), `export { humanize } from ${src("index.ts")};\nexport { diffText, applyReverts } from ${src("diff.ts")};\nexport { STYLED } from ${src("calibration.ts")};\n`);
   await build({ input: join(dir, "entry.ts"), output: { file: join(dir, "engine.mjs"), format: "esm" }, logLevel: "silent" });
   return import(pathToFileURL(join(dir, "engine.mjs")).href);
 }
@@ -552,6 +552,47 @@ async function main() {
     await sleep(300);
     got = await run();
     assert(got === ROBOTIC, `original differs:\n${JSON.stringify(got)}`);
+  });
+
+  await check("SlopMonster's checks in the packaged app: listed and marked, its edit explained and restorable; the prepared text is typed exactly", async () => {
+    const { humanize, diffText, applyReverts, STYLED } = await engine();
+    const src = STYLED.essay;
+    const r = humanize(src);
+    const d = diffText(src, r.output);
+    await prepare(src, { seconds: 14, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+    await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+    const line = await ui(`document.querySelector('[data-testid="humanize-status"]').textContent`);
+    assert(line.includes(`${r.score}% (${r.flagged} of ${r.applicable} style checks flagged)`), `status line: ${line}`);
+    const checks = JSON.parse(
+      await ui(`JSON.stringify([...document.querySelectorAll('[data-testid="humanize-checks"] li')].map((li) => [li.dataset.check, li.className, li.querySelector(".humanize__src")?.textContent ?? ""]))`),
+    );
+    const want = r.checks.map((c) => [c.id, !c.applicable ? "is-na" : c.flagged ? (c.advisory ? "is-note" : "is-flagged") : "", c.source === "slopmonster" ? "SlopMonster" : ""]);
+    assert(JSON.stringify(checks) === JSON.stringify(want), `checklist:\n${JSON.stringify(checks)}\nexpected\n${JSON.stringify(want)}`);
+    console.log(`    ${r.score}% (${r.flagged} of ${r.applicable}); SlopMonster flagged: ${r.checks.filter((c) => c.source && c.flagged).map((c) => c.id).join(", ")}`);
+    // The "leverage" → "use" edit: selected, explained as SlopMonster's, kept as original.
+    const to = d.changes.find((c) => c.before === "leverage" && c.after === "use");
+    assert(to, "no 'leverage' change in the diff");
+    await ui(`(document.querySelector('[data-testid="studio"] button[data-change="${to.id}"]').click(), 1)`);
+    await sleep(200);
+    const reason = await ui(`document.querySelector('[data-testid="studio-reason"]').textContent`);
+    assert(reason === "Replaced a buzzword with a plain word (SlopMonster vocabulary list).", `reason: ${reason}`);
+    await ui(`(__tw.click("studio-revert"), 1)`);
+    await sleep(300);
+    const mixed = applyReverts(d, new Set([to.id]));
+    assert(mixed.includes("Teachers can leverage these tools") && mixed !== r.output, "the expected mix is wrong");
+    await resetDoc();
+    await ui(`(__tw.click("btn-start"), 1)`);
+    await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", 45000, "completion");
+    const got = await docValue();
+    assert(got === mixed, `typed text differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(mixed)}`);
+    assert((await ui(`document.getElementById("source-text").value`)) === src, "the original in the editor changed");
+    await ensureIdle();
+    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await sleep(300);
   });
 
   await check("large documents: a 500,000-character paragraph and an 800-paragraph essay are humanized, highlighted and restorable; the prepared text is exact; a long humanized document is typed exactly", async () => {

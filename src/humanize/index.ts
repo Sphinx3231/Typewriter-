@@ -1,7 +1,11 @@
+import { audit as slopAudit, normalise as slopNormalise, type Hits } from "./slopmonster";
+
 /**
  * Smart Humanization (SPEC §2a): a local writing-style checklist and a minimal rule-based
  * rewrite. No model, no network. The score is a style heuristic, never a judgement of who (or
  * what) wrote the text.
+ *
+ * Five of the checks come from SlopMonster's checker (./slopmonster, MIT), ported to run here.
  *
  * The original is never modified: `humanize` always derives its output from the source it is
  * given, so running it on its own output is never needed (and the UI never does).
@@ -17,7 +21,13 @@ export type CheckId =
   | "formal-phrasing"
   | "sentence-structure"
   | "vague-statements"
-  | "tone-mismatch";
+  | "tone-mismatch"
+  // From SlopMonster's checker:
+  | "buzzwords"
+  | "stock-phrases"
+  | "rule-of-three"
+  | "punctuation-habits"
+  | "numeric-claims";
 
 export interface CheckResult {
   id: CheckId;
@@ -27,6 +37,10 @@ export interface CheckResult {
   flagged: boolean;
   /** Short, human-readable reasons (e.g. the repeated phrase). Empty when not flagged. */
   evidence: string[];
+  /** A note for the writer that never counts toward the score. */
+  advisory?: boolean;
+  /** Where the check comes from, when it isn't Typewriter's own. */
+  source?: "slopmonster";
 }
 
 export interface Edit {
@@ -74,7 +88,15 @@ export const CHECK_LABELS: Record<CheckId, string> = {
   "sentence-structure": "Repetitive sentence structure",
   "vague-statements": "Vague statements",
   "tone-mismatch": "Mismatch with the chosen tone",
+  buzzwords: "Overused buzzwords",
+  "stock-phrases": "Stock phrases and constructions",
+  "rule-of-three": "Tidy lists of three",
+  "punctuation-habits": "Dash, hyphen and semicolon habits",
+  "numeric-claims": "Numbers to double-check",
 };
+
+/** Checks that are shown as notes and never count toward the score (see SlopMonster below). */
+export const ADVISORY: ReadonlySet<CheckId> = new Set(["punctuation-habits", "numeric-claims"]);
 
 // ---------------------------------------------------------------- text helpers
 
@@ -192,6 +214,41 @@ function check(id: CheckId, applicable: boolean, flagged: boolean, evidence: str
   return { id, label: CHECK_LABELS[id], applicable, flagged: applicable && flagged, evidence: applicable && flagged ? evidence : [] };
 }
 
+/**
+ * SlopMonster's five categories as checklist items. Upstream fails a category on any hit (it
+ * gates short web pages); here the scored ones need enough of a pattern, and hits that one of
+ * Typewriter's own checks already counts are left out, so nothing is counted twice. The limits
+ * come from calibration.test.ts (40 public-domain passages, none flagged):
+ * - buzzwords and stock phrases: 2 or more (no passage has more than 1);
+ * - lists of three: at least one per 150 words (passages have at most one per 228 words);
+ * - dash, hyphen and semicolon habits are a note only: they fired on 13 of the 40 passages,
+ *   because em-dashes and semicolons are ordinary in essays and fiction;
+ * - numbers next to "customers", "users" and the like are a note only: the rewrite never changes
+ *   a number, and only the writer knows whether a figure is real.
+ */
+const OWN_VOCAB = new Set(["leverage", "delve", "in today's"]);
+const OWN_PHRASES = new Set(["essay-summary phrasing"]);
+
+function slopChecks(text: string, n: number): CheckResult[] {
+  const h: Hits = slopAudit(slopNormalise(text));
+  const applicable = n >= MIN_WORDS;
+  const sm = (c: CheckResult): CheckResult => ({ ...c, source: "slopmonster", ...(ADVISORY.has(c.id) ? { advisory: true } : {}) });
+  const more = (list: string[], max: number) => (list.length > max ? [...list.slice(0, max), `and ${list.length - max} more`] : list);
+  const times = (k: string, c: number) => (c > 1 ? `${k} ×${c}` : k);
+
+  const vocab = h.vocab.filter(([w]) => !OWN_VOCAB.has(w));
+  const vocabCount = vocab.reduce((a, [, c]) => a + c, 0);
+  const phrases = h.phrases.filter(([l]) => !OWN_PHRASES.has(l));
+  const phraseCount = phrases.reduce((a, [, c]) => a + c, 0);
+  return [
+    sm(check("buzzwords", applicable, vocabCount >= 2, [more(vocab.map(([w, c]) => times(`"${w}"`, c)), 6).join(", ")])),
+    sm(check("stock-phrases", applicable, phraseCount >= 2, [more(phrases.map(([l, c]) => times(l, c)), 5).join("; ")])),
+    sm(check("rule-of-three", applicable, h.rhythm.length >= 1 && h.rhythm.length * 150 >= n, [more(h.rhythm.map(([, m]) => `"${m.replace(/[\s.!?,;:]+$/u, "")}"`), 3).join(", ")])),
+    sm(check("punctuation-habits", applicable, h.punctuation.length > 0, more(h.punctuation.map(([rule, d]) => (rule.startsWith("semicolon") ? `${d.replace(" found", "")} semicolons` : `${rule}: "${d}"`)), 3))),
+    sm(check("numeric-claims", applicable, h.proof.length > 0, [`${more(h.proof.map((p) => `"${p}"`), 4).join(", ")}: make sure each one is real and sourced`])),
+  ];
+}
+
 export function runChecks(text: string, tone: Tone = "any"): CheckResult[] {
   const ws = words(text);
   const ss = sentences(text);
@@ -299,13 +356,15 @@ export function runChecks(text: string, tone: Tone = "any"): CheckResult[] {
     out.push(check("tone-mismatch", tone !== "any" && n >= MIN_WORDS, evidence.length > 0, evidence));
   }
 
+  out.push(...slopChecks(text, n));
   return out;
 }
 
-/** Flagged applicable checks ÷ applicable checks × 100; null when no check applies. */
+/** Flagged applicable checks ÷ applicable checks × 100 (notes not counted); null when no check applies. */
 export function score(checks: CheckResult[]): { score: number | null; flagged: number; applicable: number; qualifies: boolean } {
-  const applicable = checks.filter((c) => c.applicable).length;
-  const flagged = checks.filter((c) => c.applicable && c.flagged).length;
+  const scored = checks.filter((c) => !c.advisory);
+  const applicable = scored.filter((c) => c.applicable).length;
+  const flagged = scored.filter((c) => c.applicable && c.flagged).length;
   if (applicable === 0) return { score: null, flagged, applicable, qualifies: false };
   // Integer comparison, so exactly 50% qualifies without floating-point doubt.
   return { score: Math.round((flagged * 100) / applicable), flagged, applicable, qualifies: flagged * 100 >= THRESHOLD * applicable };
@@ -358,7 +417,7 @@ function rules(tone: Tone): Rule[] {
     {
       id: "generic-opener",
       re: new RegExp(
-        String.raw`(^|\n[ \t]*)(?:In today['’]s (?:fast-paced |modern |digital |ever-changing |rapidly changing |interconnected )?(?:world|society|age|era)|In this day and age|In the modern (?:world|era|age)|Since the dawn of (?:time|humanity|civilization)|Throughout (?:human )?history|In recent years),[ \t]+(\p{L}[\p{L}'’-]*)`,
+        String.raw`(^|\n[ \t]*)(?:In today['’]s (?:fast-paced |modern |digital |ever-changing |rapidly changing |interconnected )?(?:world|society|age|era|landscape)|In this day and age|In the modern (?:world|era|age)|Since the dawn of (?:time|humanity|civilization)|Throughout (?:human )?history|In recent years),[ \t]+(\p{L}[\p{L}'’-]*)`,
         "gu",
       ),
       replace: (_m, pre, next) => pre + capitalize(next),
@@ -386,6 +445,27 @@ function rules(tone: Tone): Rule[] {
       replace: (_m, pre, next) => pre + capitalize(next),
       prefixed: true,
     },
+    // The rest of this list puts SlopMonster's editing guidance (prompts/cleanse.txt) into fixed
+    // edits, only where the shorter wording means the same in any context. Its other findings
+    // ("not just X, but Y", lists of three, buzzwords with a literal sense) need judgement, so
+    // the Studio reports them and leaves the wording to the writer.
+    // Throat-clearing that opens a sentence: "Here's the thing: you need a plan." → "You need a plan."
+    // Only these forms: "Here's the thing." can be literal, "Here's the thing, though…" goes on,
+    // and "Let's break it down." can mean a box.
+    {
+      id: "throat-clearing",
+      re: new RegExp(SS + String.raw`(?:Here['’]s the thing:|The truth is(?:,| that))[ \t]+(\p{L}[\p{L}'’-]*)`, "gu"),
+      replace: (_m, pre, next) => pre + capitalize(next),
+      prefixed: true,
+    },
+    // Stacked hedges: one qualifier is enough.
+    wordy("stacked-hedge", /\b(?:may|could) potentially\b/giu, (m) => m.split(/\s/)[0].toLowerCase()),
+    wordy("stacked-hedge", /\bmight possibly\b/giu, "might"),
+    // Padding around a word that already says it.
+    wordy("intensifier", /\bvery unique\b/giu, "unique"),
+    wordy("intensifier", /\bquite literally\b/giu, "literally"),
+    wordy("intensifier", /\bmore than just\b/giu, "more than"),
+    // Not "helps you to": "it helps you to your seat" needs its "to".
   ];
   if (tone !== "formal") {
     list.push(
@@ -404,6 +484,14 @@ function rules(tone: Tone): Rule[] {
       wordy("plain-words", /\bendeavou?r to\b/giu, "try to"),
       wordy("plain-words", /\bdelv(?:e|es|ed|ing) into\b/giu, (m) => `${SUFFIX("look")(m.split(/\s/)[0])} into`),
       wordy("plain-words", /\bnumerous\b/giu, "many"),
+      // "leverage" as a verb (followed by what is used, not preceded by an article or the like,
+      // which would make it the noun: "the leverage the deal gave them").
+      wordy(
+        "buzzword",
+        /(?<!\b(?:the|a|an|of|their|our|his|her|its|my|your|financial|more|less|some|any|no|much|enough)[ \t]+)\bleverag(?:e|es|ed|ing)\b(?=[ \t]+(?:the|a|an|our|your|their|its|his|her|my|this|that|these|those|existing|many|every|each|all|both|new|data|technology|tools?|AI)\b)/giu,
+        SUFFIX("use"),
+      ),
+      wordy("buzzword", /\bharness(?:es|ed|ing)? the power of\b/giu, (m) => ({ harness: "use", harnesses: "uses", harnessed: "used", harnessing: "using" })[m.split(/\s/)[0].toLowerCase()]!),
     );
   }
   return list;

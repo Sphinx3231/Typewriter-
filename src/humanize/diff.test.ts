@@ -125,14 +125,14 @@ describe("diffText", () => {
       ["utilize", "use", "replaced"],
       ["in order ", "", "removed"],
       ["Furthermore, teachers", "Teachers", "replaced"],
-      ["numerous", "many", "replaced"],
+      ["leverage numerous", "use many", "replaced"],
       ["in order ", "", "removed"],
       ["Additionally, it is important to note that schools", "Schools", "replaced"],
       ["commence", "start", "replaced"],
       ["In conclusion, technology", "Technology", "replaced"],
     ]);
     // Counted by hand: "fast-paced" is two words; sentences 1, 2, 3, 4 and the last one of the revised text are touched.
-    expect(d.stats).toEqual({ changes: 9, wordsRemoved: 26, wordsAdded: 7, wordsChanged: 26, sentencesAdjusted: 5 });
+    expect(d.stats).toEqual({ changes: 9, wordsRemoved: 27, wordsAdded: 8, wordsChanged: 27, sentencesAdjusted: 5 });
   });
 
   it("stays exact and fast on a large document", () => {
@@ -212,6 +212,25 @@ describe("diffText", () => {
     expect(d.changes.length).toBe(3 * 11_628 - 1);
     expect(Math.max(...d.changes.slice(0, 1000).map((c) => c.before.length + c.after.length))).toBeLessThan(20);
   }, 60_000);
+
+  it("three changes in a row split where the words line up, so each restores on its own", () => {
+    // Myers alone pairs "Furthermore," with "Teachers" and "teachers" with "use": restoring that
+    // second change would give "Teachers teachers many platforms".
+    const o = "Furthermore, teachers leverage numerous platforms.";
+    const r = "Teachers use many platforms.";
+    const d = diffText(o, r);
+    rebuilds(d);
+    expect(pairs(d)).toEqual([
+      ["Furthermore, teachers", "Teachers", "replaced"],
+      ["leverage numerous", "use many", "replaced"],
+    ]);
+    expect(applyReverts(d, new Set([1]))).toBe("Teachers leverage numerous platforms.");
+    expect(applyReverts(d, new Set([0]))).toBe("Furthermore, teachers use many platforms.");
+    // Unrelated neighbours with no words in common keep Myers' split.
+    const plain = diffText("alpha beta gamma end", "one two three end");
+    rebuilds(plain);
+    expect(plain.changes.length).toBeGreaterThanOrEqual(1);
+  });
 
   it("a large multi-paragraph document (800 paragraphs, 471,000 characters) completes and rebuilds exactly", () => {
     // Regression: the same crash, reached when the line pass gives up and the whole text is diffed.
@@ -304,7 +323,7 @@ describe("explain", () => {
   it("matches each change to the recorded edit that made it", () => {
     expect(why("utilize")).toBe("Simplified an unnecessarily formal expression.");
     expect(why("in order ")).toBe("Simplified an unnecessarily formal expression.");
-    expect(why("numerous")).toBe("Simplified an unnecessarily formal expression.");
+    expect(why("leverage numerous")).toBe("Simplified an unnecessarily formal expression; Replaced a buzzword with a plain word (SlopMonster vocabulary list).");
     expect(why("In today's fast-paced world, technology")).toBe("Removed a stock opening phrase, and capitalized the next word.");
     expect(why("In conclusion, technology")).toBe("Removed a stock conclusion phrase, and capitalized the next word.");
     expect(why("Furthermore, teachers")).toBe("Removed a repeated transition (an earlier sentence already opens with one), and capitalized the next word.");

@@ -79,9 +79,17 @@ describe("HumanizeStatus", () => {
     await userEvent.click(screen.getByText("Style checks"));
     expect(screen.getByText(/writing-style heuristic.*does not and cannot tell who, or what, wrote the text/)).toBeTruthy();
     const checks = within(screen.getByTestId("humanize-checks")).getAllByRole("listitem");
-    expect(checks).toHaveLength(8);
+    // Typewriter's eight checks, then SlopMonster's five (three scored, two notes).
+    expect(checks).toHaveLength(13);
     expect(checks.some((li) => /Formulaic transitions: flagged/.test(li.textContent!))).toBe(true);
     expect(checks.some((li) => /doesn't apply/.test(li.textContent!))).toBe(true);
+    const sm = checks.filter((li) => li.querySelector(".humanize__src")?.textContent === "SlopMonster");
+    expect(sm.map((li) => li.dataset.check)).toEqual(["buzzwords", "stock-phrases", "rule-of-three", "punctuation-habits", "numeric-claims"]);
+    const numbers = checks.find((li) => li.dataset.check === "numeric-claims")!;
+    expect(numbers.className).toBe("is-note");
+    expect(numbers.textContent).toBe('Numbers to double-checkSlopMonster: note, not scored ("30 million students": make sure each one is real and sourced)');
+    expect(checks.find((li) => li.dataset.check === "punctuation-habits")!.textContent).toBe("Dash, hyphen and semicolon habitsSlopMonster: nothing to note");
+    expect(screen.getByText(/Checks marked SlopMonster come from the open-source SlopMonster checker \(MIT\), built into Typewriter/)).toBeTruthy();
 
     await userEvent.click(screen.getByTestId("humanize-restore"));
     expect(h.typeOriginal).toHaveBeenCalledTimes(1);
@@ -140,7 +148,7 @@ describe("HumanizeStatus", () => {
   it("says no changes are needed below 50%", async () => {
     show({}, NATURAL);
     expect(headline()).toBe("No changes needed");
-    expect(line()).toMatch(/\d+% \(\d of \d style checks flagged\), below 50%\. Your text is typed as written\./);
+    expect(line()).toMatch(/\d+% \(\d+ of \d+ style checks flagged\), below 50%\. Your text is typed as written\./);
     await userEvent.click(screen.getByText("Style checks"));
     expect(screen.getByTestId("humanize-checks")).toBeTruthy();
     expect(screen.queryByTestId("studio")).toBeNull();
