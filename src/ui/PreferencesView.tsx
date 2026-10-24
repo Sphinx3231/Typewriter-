@@ -6,7 +6,7 @@ import type { ThemePreference } from "../theme/theme";
 import { Button, ConfirmButton, Field, Segmented, Switch, useToast } from "./controls";
 import { LogoMark } from "./Logo";
 import { APP_COMMIT, APP_VERSION } from "../build";
-import { SLOPMONSTER_LICENSE } from "../humanize/slopmonster/license";
+import { SLOPMONSTER_LICENSE } from "../humanize/slopmonster/notice";
 import { isDesktop } from "../platform";
 
 const SHORTCUTS: [string, string][] = [
