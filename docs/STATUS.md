@@ -53,7 +53,18 @@ So in runs 36–43:
 
 The "Windows bug already in v1.2.0" reported for run 37 was not shown by those runs, and the upgrade check's PASS in runs 41 and 43 proves nothing.
 
-**Fix (`e2e-desktop/upgrade.mjs`, `desktop.yml`):**
+**Run 44** (`dda76fd`): the first fix didn't work, and the new guard caught it:
+- v1.2.0's session, given `--user-data-dir=<the app's profile>`, still never wrote that profile ("last written never").
+- The check stopped with "NOT THE APP'S PROFILE" instead of passing on nothing.
+- So msedgedriver doesn't take the profile from browser arguments for WebView2.
+
+**Fix, second attempt (local):** on Windows, `upgrade.mjs` no longer uses WebDriver.
+- It starts the installed app like a user, adding only a remote-debugging port through `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, the attach method in Microsoft's WebView2 testing docs.
+- Playwright attaches to the main window over CDP.
+- The "profile written" guard stays.
+- Tested here against a stand-in: Chromium serving the built app with its exact CSP. It attached, picked the main page, changed "Typing mistakes" and the theme, and read storage back. The Linux path still passes.
+
+**First fix attempt (`dda76fd`, `e2e-desktop/upgrade.mjs`, `desktop.yml`):**
 - On Windows each session passes `--user-data-dir=<LOCALAPPDATA>\app.typewriter.desktop\EBWebView` (the app's own profile).
 - The check now fails ("NOT THE APP'S PROFILE") if the session never wrote that profile. Every launch saves its preferences, so a session in the real profile always does.
 - v1.2.0 is now closed at once, like the new version, instead of after 70 s. The control step then shows whether it really loses anything.

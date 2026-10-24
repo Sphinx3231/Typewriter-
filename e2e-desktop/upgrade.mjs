@@ -17,10 +17,12 @@
  * Linux: runs on its own Xvfb display (:98) and uses $HOME as the user. Windows: the current user.
  * Needs tauri-driver (and msedgedriver on Windows) on PATH.
  *
- * Windows: msedgedriver gives every session a temporary WebView2 profile unless the browser
- * arguments name one, so nothing a session saved could ever be seen by the next one (runs 36–43:
- * every key the check changed was "lost", and the real profile was never written). Each session
- * is therefore pointed at the app's own profile, and fails if that profile wasn't written.
+ * Windows: WebDriver can't be used here. msedgedriver runs the app's WebView2 in a temporary
+ * profile, even with --user-data-dir in the browser arguments (runs 36–44: the real profile was
+ * never written by a session, so every key the check changed was "lost"). Instead the app is
+ * started the way a user starts it, with only a remote-debugging port added
+ * (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS), and Playwright attaches to it over CDP. Each run
+ * fails if the app's own profile wasn't written.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -72,15 +74,34 @@ if (linux) {
   bg("Xvfb", [":98", "-screen", "0", "1600x1000x24", "-nolisten", "tcp"]);
   await sleep(800);
   bg("openbox", ["--sm-disable"]);
+  bg("tauri-driver", ["--port", "4455", "--native-port", "4456"]); // away from the harness defaults (4444, 4445)
+  await until(() => fetch(WD + "/status").then((r) => r.ok), 15000, "tauri-driver");
 }
-bg("tauri-driver", ["--port", "4455", "--native-port", "4456"]); // away from the harness defaults (4444, 4445)
-await until(() => fetch(WD + "/status").then((r) => r.ok), 15000, "tauri-driver");
+/**
+ * Windows: starts the app like a user (its own WebView2 profile), with a remote-debugging port,
+ * and attaches Playwright to its main window. Returns a function that runs a script body there.
+ */
+let cdp = null;
+async function attach() {
+  const port = 9333;
+  // Detached: the app must outlive nothing here, and closing it is up to closeLikeUser.
+  spawn(app, [], { env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` }, stdio: "ignore", detached: true }).unref();
+  const { chromium } = await import("@playwright/test");
+  const browser = (cdp = await until(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 5000 }), 60000, "the app's WebView2 to accept a CDP connection"));
+  const main = await until(async () => {
+    for (const p of browser.contexts().flatMap((c) => c.pages())) if (!/hud\.html/.test(p.url()) && (await p.evaluate(() => !!document.getElementById("root")).catch(() => false))) return p;
+  }, 30000, "the main window's page");
+  // A string is evaluated by CDP itself (the page's CSP has no 'unsafe-eval' for new Function).
+  return (body) => main.evaluate(`(() => { ${body} })()`);
+}
 let sid;
 const started = Date.now();
 try {
-  const options = linux ? { application: app } : { application: app, args: [`--user-data-dir=${PROFILE}`] };
-  sid = (await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": options } } })).sessionId;
-  const js = (s) => wd("POST", `/session/${sid}/execute/sync`, { script: s, args: [] });
+  let js;
+  if (linux) {
+    sid = (await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": { application: app } } } })).sessionId;
+    js = (s) => wd("POST", `/session/${sid}/execute/sync`, { script: s, args: [] });
+  } else js = await attach();
   await until(() => js(`return !!document.querySelector('[data-testid="btn-start"]')`), 30000, "UI");
   const radio = (g) => js(`const x = [...document.querySelectorAll('[role="radiogroup"]')].find((x) => x.getAttribute("aria-label") === ${JSON.stringify(g)}); return x && x.querySelector('[aria-checked="true"]') && x.querySelector('[aria-checked="true"]').textContent.trim();`);
   /** Chooses an option of the group other than the current one (labels differ between versions). */
@@ -145,6 +166,7 @@ try {
   }
 } finally {
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
+  await cdp?.close().catch(() => {});
   await sleep(800);
   for (const p of procs.reverse()) p.kill("SIGTERM");
 }

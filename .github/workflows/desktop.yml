@@ -116,10 +116,10 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
           if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
-          # Closed at once, like the new version below. Runs 36-43 seemed to show v1.2.0 losing
-          # settings changed before closing, but every WebDriver session then ran in a temporary
-          # WebView2 profile (run 43: the real profile was never written by a session), so nothing
-          # could survive. upgrade.mjs now uses the app's own profile and fails if it wasn't written.
+          # Closed at once, like the new version below. Runs 36-44 seemed to show v1.2.0 losing
+          # settings changed before closing, but msedgedriver ran the app's WebView2 in a temporary
+          # profile, even with --user-data-dir (run 44), so nothing could survive. upgrade.mjs now
+          # starts the app like a user and attaches over CDP, and fails if its profile wasn't written.
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
           node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
