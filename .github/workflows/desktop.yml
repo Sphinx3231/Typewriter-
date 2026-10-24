@@ -141,6 +141,23 @@ jobs:
           "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
       - name: The settings saved in v1.2.0 survived the upgrade
         run: node e2e-desktop/upgrade.mjs after "$env:TW_EXE" upgrade-state.json
+      - name: Diagnostic — the real profile, with no WebDriver attached
+        # Run 42: after WebDriver sessions, the app's WebView2 profile folder held no page storage
+        # at all, so the driver probably runs WebView2 in a temporary profile and nothing it does
+        # can persist. Here the installed app starts like a user starts it, then closes; its real
+        # profile should then hold the keys it writes at startup.
+        if: always() && env.TW_EXE != ''
+        continue-on-error: true
+        run: |
+          $p = Start-Process $env:TW_EXE -PassThru
+          Start-Sleep -Seconds 10
+          powershell -NoProfile -ExecutionPolicy Bypass -File e2e-desktop/win/input.ps1 sysclose Typewriter
+          if (-not $p.WaitForExit(20000)) { "did not exit by itself within 20 s"; Stop-Process -Id $p.Id -Force }
+          node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
+          $log = Get-ChildItem "$env:LOCALAPPDATA\app.typewriter.desktop" -Recurse -Filter typing-diagnostics.log -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($log) { Get-Content $log.FullName -Tail 2 }
+          "WebView2 profiles elsewhere (temporary ones the driver may use):"
+          Get-ChildItem $env:TEMP -Directory -Filter "scoped_dir*" -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName }
       - name: Settings changed just before closing are kept (the new app is closed at once, then reopened)
         run: |
           node e2e-desktop/upgrade.mjs before "$env:TW_EXE" close-state.json
