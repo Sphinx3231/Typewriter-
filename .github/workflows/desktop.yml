@@ -116,13 +116,12 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
           if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
-          # v1.2.0 loses settings changed before closing (fixed in this build): it exits without
-          # waiting for WebView2's browser process to write page storage out. Runs 38 and 40 lost
-          # them 10 s and 70 s after the change. The old version still gets 70 s.
-          $env:SETTLE_MS = "70000"
+          # Closed at once, like the new version below. Runs 36-43 seemed to show v1.2.0 losing
+          # settings changed before closing, but every WebDriver session then ran in a temporary
+          # WebView2 profile (run 43: the real profile was never written by a session), so nothing
+          # could survive. upgrade.mjs now uses the app's own profile and fails if it wasn't written.
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
-          $env:SETTLE_MS = ""
           node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
           # Control: the previous version, reopened. The keys it lost by itself are dropped, so the
           # upgrade check below covers exactly what was on disk (and fails if nothing was).
@@ -142,10 +141,9 @@ jobs:
       - name: The settings saved in v1.2.0 survived the upgrade
         run: node e2e-desktop/upgrade.mjs after "$env:TW_EXE" upgrade-state.json
       - name: Diagnostic — the real profile, with no WebDriver attached
-        # Run 42: after WebDriver sessions, the app's WebView2 profile folder held no page storage
-        # at all, so the driver probably runs WebView2 in a temporary profile and nothing it does
-        # can persist. Here the installed app starts like a user starts it, then closes; its real
-        # profile should then hold the keys it writes at startup.
+        # The installed app started like a user starts it, with no WebDriver, then closed: its real
+        # profile then holds the keys it writes at startup (run 43: it did; WebDriver sessions
+        # had never written it). Also prints the exit's storage-flush line.
         if: always() && env.TW_EXE != ''
         continue-on-error: true
         run: |

@@ -4,9 +4,9 @@
  *
  *   node e2e-desktop/upgrade.mjs before <app> <state.json>   in the old version: change settings, then close (SETTLE_MS later)
  *   node e2e-desktop/upgrade.mjs check <app> <state.json>    the old version again: they were really saved
- *   node e2e-desktop/upgrade.mjs control <app> <state.json>  like check, for an old version that loses some of its
- *                                                            own changes (Windows v1.2.0): the keys it lost are
- *                                                            dropped from state.json, and "after" checks the rest
+ *   node e2e-desktop/upgrade.mjs control <app> <state.json>  like check, for an old version that may lose some of
+ *                                                            its own changes: the keys it lost are dropped from
+ *                                                            state.json, and "after" checks the rest
  *   (install the new version over the old one)
  *   node e2e-desktop/upgrade.mjs after <app> <state.json>    in the new version: every saved setting is still there
  *
@@ -16,14 +16,31 @@
  *
  * Linux: runs on its own Xvfb display (:98) and uses $HOME as the user. Windows: the current user.
  * Needs tauri-driver (and msedgedriver on Windows) on PATH.
+ *
+ * Windows: msedgedriver gives every session a temporary WebView2 profile unless the browser
+ * arguments name one, so nothing a session saved could ever be seen by the next one (runs 36–43:
+ * every key the check changed was "lost", and the real profile was never written). Each session
+ * is therefore pointed at the app's own profile, and fails if that profile wasn't written.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const [mode, app, stateFile] = process.argv.slice(2);
 const linux = process.platform === "linux";
 const env = linux ? { ...process.env, DISPLAY: ":98", GDK_BACKEND: "x11", XDG_SESSION_TYPE: "x11" } : process.env;
+/** The app's own WebView2 profile (Tauri: <local app data>/<identifier>/EBWebView). */
+const PROFILE = linux ? null : join(process.env.LOCALAPPDATA, "app.typewriter.desktop", "EBWebView");
+/** The newest change to page storage in the app's profile, in ms (0 if none). */
+function storageWritten() {
+  const dir = join(PROFILE, "Default", "Local Storage");
+  try {
+    const files = readdirSync(dir, { recursive: true }).map((f) => statSync(join(dir, f))).filter((st) => st.isFile());
+    return Math.max(0, ...files.map((st) => st.mtimeMs));
+  } catch {
+    return 0;
+  }
+}
 const procs = [];
 const bg = (c, a) => { const p = spawn(c, a, { env, stdio: "ignore" }); procs.push(p); return p; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -59,8 +76,10 @@ if (linux) {
 bg("tauri-driver", ["--port", "4455", "--native-port", "4456"]); // away from the harness defaults (4444, 4445)
 await until(() => fetch(WD + "/status").then((r) => r.ok), 15000, "tauri-driver");
 let sid;
+const started = Date.now();
 try {
-  sid = (await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": { application: app } } } })).sessionId;
+  const options = linux ? { application: app } : { application: app, args: [`--user-data-dir=${PROFILE}`] };
+  sid = (await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": options } } })).sessionId;
   const js = (s) => wd("POST", `/session/${sid}/execute/sync`, { script: s, args: [] });
   await until(() => js(`return !!document.querySelector('[data-testid="btn-start"]')`), 30000, "UI");
   const radio = (g) => js(`const x = [...document.querySelectorAll('[role="radiogroup"]')].find((x) => x.getAttribute("aria-label") === ${JSON.stringify(g)}); return x && x.querySelector('[aria-checked="true"]') && x.querySelector('[aria-checked="true"]').textContent.trim();`);
@@ -81,8 +100,8 @@ try {
     const ls = JSON.parse(await dump());
     if (!Object.keys(ls).length) throw new Error("nothing was saved");
     writeFileSync(stateFile, JSON.stringify({ ui: after, ls }, null, 1));
-    // SETTLE_MS: give an old version time to save before it closes (on Windows, v1.2.0 loses
-    // changes made in about the last minute before closing). Without it, the app is closed at once.
+    // SETTLE_MS: wait this long before closing (to tell a slow save from a lost one). Without it,
+    // the app is closed at once.
     const settle = Number(process.env.SETTLE_MS || 0);
     if (settle) await sleep(settle);
     console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}; closing ${settle ? `${settle} ms after the change` : "at once"}`);
@@ -115,6 +134,15 @@ try {
   }
   await closeLikeUser();
   console.log("closed like a user; the app exited by itself");
+  if (!linux) {
+    // Every launch saves its preferences, so a session in the real profile always writes it.
+    const at = storageWritten();
+    console.log(`the app's profile: page storage last written ${at ? new Date(at).toISOString() : "never"} (session started ${new Date(started).toISOString()})`);
+    if (at < started - 2000) {
+      console.log(`NOT THE APP'S PROFILE: the session's storage never reached ${PROFILE}, so this check proves nothing`);
+      process.exitCode = 1;
+    }
+  }
 } finally {
   if (sid) await wd("DELETE", `/session/${sid}`).catch(() => {});
   await sleep(800);

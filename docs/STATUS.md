@@ -33,6 +33,37 @@ SlopMonster's offline checker is now the only engine, and it never changes the t
   - any claim about authorship or detectors.
 - **Not changed:** CLAUDE.md rule 3 still describes the Smart Humanization exception. Nothing uses it any more. Removing it is the owner's call.
 
+### Windows run 43 and the cause of the "settings lost on close" failures (2026-10-24)
+
+**Run 43** (`540cbe9`, release off):
+- Builds: Linux, macOS and Windows passed. CI run 67 passed.
+- Installer: `Typewriter_1.2.0_x64-setup.exe`, 2,845,698 bytes, SHA-256 `03D6C86DD36F9B8BE2A6595CE9EFFB2E5AE8CA6AD06471335AD5702A015DAC8C`.
+- It installed silently over v1.2.0, and "UPGRADE PRESERVED SETTINGS" printed PASS (vacuous, see below).
+- "Settings changed just before closing are kept" failed again. The Windows end-to-end suite, including the writing-analysis check, was skipped after it, so **writing analysis has not run on Windows yet**.
+
+**Cause: the test harness, not the app (proven by run 43's driver-free step).**
+- msedgedriver gives every WebDriver session a temporary WebView2 profile unless the browser arguments name one. tauri-driver passes `tauri:options.args` as those arguments, and the harness passed none.
+- Started without WebDriver, the installed app wrote `settings`, `prefs` and `history` to its real profile (`EBWebView\Default\Local Storage`, 14:06:29).
+- The WebDriver session that then changed settings (14:06:42) never touched that file.
+- After v1.2.0's WebDriver session, the real profile had no Local Storage at all.
+
+So in runs 36–43:
+- every key the check changed (`settings`, `theme`) was "lost";
+- the keys it didn't change (`prefs`, `history`) only looked kept, because every launch rewrites them with the same default values.
+
+The "Windows bug already in v1.2.0" reported for run 37 was not shown by those runs, and the upgrade check's PASS in runs 41 and 43 proves nothing.
+
+**Fix (`e2e-desktop/upgrade.mjs`, `desktop.yml`):**
+- On Windows each session passes `--user-data-dir=<LOCALAPPDATA>\app.typewriter.desktop\EBWebView` (the app's own profile).
+- The check now fails ("NOT THE APP'S PROFILE") if the session never wrote that profile. Every launch saves its preferences, so a session in the real profile always does.
+- v1.2.0 is now closed at once, like the new version, instead of after 70 s. The control step then shows whether it really loses anything.
+
+Verified here: the Linux path passes (closed at once, 4/4 keys kept), and the guard's file check works on a fake profile. The Windows path needs the next CI run.
+
+**App code, not changed yet:** the Windows storage flush added on 2026-10-21 (`storage_flush` in `src-tauri/src/lib.rs`) never worked.
+- In all 4 logged exits it found "0 of 0 webviews" (it runs after the window is already destroyed) and waited the full 6 s. Every Windows close is therefore 6 s slower, for nothing.
+- It was built to fix a loss that came from the harness. Once a corrected run shows whether settings changed just before closing are kept, it should be removed (or, if they really are lost, rebuilt to run before the window is destroyed).
+
 ### Tests (2026-10-24)
 
 - **Unit** (Vitest): **770/770**; lint (tsc) clean. The 500,000-character paragraph is checked and cut for highlighting in about 0.65 s in Node, and the 800-paragraph document (333,541 characters, CRLF) in about 0.36 s. The parity test is unchanged: identical to `deslop.py` on 152 inputs, and the located findings rebuild that report exactly.
@@ -60,6 +91,7 @@ SlopMonster's offline checker is now the only engine, and it never changes the t
     - with typos on, the text is typed into another app exactly, with the analysis on and off;
     - a 498,000-character paragraph (6,000 findings, shown after 9.7 s; UI round trip 191 ms while checking) and an 800-paragraph essay (471,200 characters, 4,000 findings, 9.9 s; 48 ms) can be navigated, and **Copy text** gives exactly the text;
     - a 10-paragraph document is typed exactly.
+- **Windows (CI run 43):** see the section above: builds and install passed, and the end-to-end suite didn't run.
 - **Windows installer (cross-built on Linux from this code):** `src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/Typewriter_1.2.0_x64-setup.exe`.
   - Version 1.2.0, 3,075,408 bytes, SHA-256 `a19c6b7ce99b7557ba9016f4c569e0198fa6e21c476240724db229760a43cec2`.
   - Unsigned, GNU target, built with `npx tauri build --target x86_64-pc-windows-gnu --bundles nsis`. It ships `WebView2Loader.dll`.
