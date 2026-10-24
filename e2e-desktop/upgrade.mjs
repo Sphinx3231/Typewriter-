@@ -4,6 +4,9 @@
  *
  *   node e2e-desktop/upgrade.mjs before <app> <state.json>   in the old version: change settings, then close (SETTLE_MS later)
  *   node e2e-desktop/upgrade.mjs check <app> <state.json>    the old version again: they were really saved
+ *   node e2e-desktop/upgrade.mjs control <app> <state.json>  like check, for an old version that loses some of its
+ *                                                            own changes (Windows v1.2.0): the keys it lost are
+ *                                                            dropped from state.json, and "after" checks the rest
  *   (install the new version over the old one)
  *   node e2e-desktop/upgrade.mjs after <app> <state.json>    in the new version: every saved setting is still there
  *
@@ -84,7 +87,7 @@ try {
     if (settle) await sleep(settle);
     console.log(`before (${app}): theme button ${t}; ui ${JSON.stringify(after)}; ${Object.keys(ls).length} stored keys: ${Object.keys(ls).join(", ")}; closing ${settle ? `${settle} ms after the change` : "at once"}`);
   } else {
-    const label = mode === "check" ? "reopened, before the upgrade" : "after the upgrade";
+    const label = mode !== "after" ? "reopened, before the upgrade" : "after the upgrade";
     const saved = JSON.parse(readFileSync(stateFile, "utf8"));
     const ls = JSON.parse(await dump());
     const lost = Object.keys(saved.ls).filter((k) => !(k in ls));
@@ -94,10 +97,21 @@ try {
     const changed = Object.keys(saved.ls).filter((k) => k in ls && !kept(parse(saved.ls[k]), parse(ls[k])));
     console.log(`${label} (${app}): ui ${JSON.stringify(ui)}; keys kept ${Object.keys(saved.ls).length - lost.length}/${Object.keys(saved.ls).length}; lost [${lost}]; values changed [${changed}]`);
     for (const k of changed) console.log(`  changed ${k}:\n    was ${saved.ls[k].slice(0, 400)}\n    now ${ls[k].slice(0, 400)}`);
-    const ok = lost.length === 0 && changed.length === 0 && JSON.stringify(ui) === JSON.stringify(saved.ui);
-    const what = mode === "check" ? "SETTINGS SAVED BEFORE THE UPGRADE" : "UPGRADE PRESERVED SETTINGS";
-    console.log(`${what}: ${ok ? "PASS" : "FAIL"}`);
-    process.exitCode = ok ? 0 : 1;
+    if (mode === "control") {
+      // What the old version really kept is what an upgrade can lose. Keys it lost by itself, and
+      // the UI they set, are not the installer's: "after" then expects exactly what is shown now.
+      const keptKeys = Object.keys(saved.ls).filter((k) => !lost.includes(k));
+      const ok = keptKeys.length > 0 && changed.length === 0;
+      writeFileSync(stateFile, JSON.stringify({ ui, ls: Object.fromEntries(keptKeys.map((k) => [k, saved.ls[k]])), lostByOldVersion: lost }, null, 1));
+      console.log(`lost by the old version itself (not the installer): [${lost}]; the upgrade must keep the other ${keptKeys.length} keys and this UI`);
+      console.log(`OLD VERSION KEPT SOME SETTINGS TO UPGRADE: ${ok ? "PASS" : "FAIL"}`);
+      process.exitCode = ok ? 0 : 1;
+    } else {
+      const ok = lost.length === 0 && changed.length === 0 && JSON.stringify(ui) === JSON.stringify(saved.ui);
+      const what = mode === "check" ? "SETTINGS SAVED BEFORE THE UPGRADE" : "UPGRADE PRESERVED SETTINGS";
+      console.log(`${what}: ${ok ? "PASS" : "FAIL"}`);
+      process.exitCode = ok ? 0 : 1;
+    }
   }
   await closeLikeUser();
   console.log("closed like a user; the app exited by itself");

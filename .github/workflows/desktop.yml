@@ -116,18 +116,17 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Typewriter" -Recurse -Filter typewriter.exe | Select-Object -First 1
           if (-not $exe) { throw "the previous version's typewriter.exe wasn't found" }
           "previous version installed: $($exe.FullName) $($exe.VersionInfo.FileVersion) $($exe.LastWriteTime)"
-          # v1.2.0 loses settings changed in about the last minute before closing (fixed in this
-          # build): WebView2 holds a page-storage write for up to a minute after the previous one
-          # and only writes it out when its browser process shuts down cleanly, which v1.2.0 did
-          # not wait for. Run 38 lost them even 10 s after the change. So the old version gets
-          # 70 s; the control below then shows they were really on disk before the upgrade.
+          # v1.2.0 loses settings changed before closing (fixed in this build): it exits without
+          # waiting for WebView2's browser process to write page storage out. Runs 38 and 40 lost
+          # them 10 s and 70 s after the change. The old version still gets 70 s.
           $env:SETTLE_MS = "70000"
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
           $env:SETTLE_MS = ""
-          # Control: the previous version, reopened, really kept them (so a loss below is the upgrade's).
-          node e2e-desktop/upgrade.mjs check $exe.FullName upgrade-state.json
-          if ($LASTEXITCODE -ne 0) { throw "the previous version itself did not keep the settings" }
+          # Control: the previous version, reopened. The keys it lost by itself are dropped, so the
+          # upgrade check below covers exactly what was on disk (and fails if nothing was).
+          node e2e-desktop/upgrade.mjs control $exe.FullName upgrade-state.json
+          if ($LASTEXITCODE -ne 0) { throw "the previous version kept no settings, or changed them" }
       - name: Install the new setup.exe silently over it and find it
         shell: pwsh
         run: |
