@@ -123,6 +123,7 @@ jobs:
           node e2e-desktop/upgrade.mjs before $exe.FullName upgrade-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not save settings in the previous version" }
           $env:SETTLE_MS = ""
+          node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
           # Control: the previous version, reopened. The keys it lost by itself are dropped, so the
           # upgrade check below covers exactly what was on disk (and fails if nothing was).
           node e2e-desktop/upgrade.mjs control $exe.FullName upgrade-state.json
@@ -144,6 +145,11 @@ jobs:
         run: |
           node e2e-desktop/upgrade.mjs before "$env:TW_EXE" close-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not change settings in the new version" }
+          # Diagnostics, before reopening: which keys reached the disk, and what the exit logged
+          # (whether WebView2's browser process exited, or the wait's limit was reached).
+          node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
+          $log = Get-ChildItem "$env:LOCALAPPDATA\app.typewriter.desktop" -Recurse -Filter typing-diagnostics.log -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($log) { "--- end of $($log.FullName):"; Get-Content $log.FullName -Tail 12 } else { "no typing-diagnostics.log found" }
           node e2e-desktop/upgrade.mjs check "$env:TW_EXE" close-state.json
           if ($LASTEXITCODE -ne 0) { throw "settings changed just before closing were lost" }
       - name: Build the Chrome extension (for the Opera check)

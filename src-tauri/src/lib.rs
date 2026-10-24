@@ -47,6 +47,19 @@ fn diag_append(path: &std::path::Path, line: &str) {
     }
 }
 
+/// One line about the app's exit (Windows: whether page storage had time to reach the disk).
+fn exit_note(app: &AppHandle, what: &str) {
+    if what.is_empty() {
+        return;
+    }
+    if let Some(path) = diag_path(app) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        diag_append(&path, &format!("\n=== {} UTC · exit · {what}", utc_now()));
+    }
+}
+
 /// Starts a session's section of the diagnostics file and returns its sink.
 fn diag_sink(app: &AppHandle, id: u64) -> DiagSink {
     let Some(path) = diag_path(app) else { return Box::new(|_: &str| {}) };
@@ -443,15 +456,28 @@ mod storage_flush {
 
     /// Closes every webview (the browser process only shuts down once none is left), then waits
     /// for it to exit. Runs off the event loop, which must keep running to deliver the event.
-    pub fn wait(app: &AppHandle) {
-        for w in app.webview_windows().values() {
-            let _ = w.destroy();
+    /// Returns what happened, for the diagnostics file.
+    pub fn wait(app: &AppHandle) -> String {
+        let windows = app.webview_windows();
+        let mut destroyed = 0;
+        for w in windows.values() {
+            if w.destroy().is_ok() {
+                destroyed += 1;
+            }
         }
         let t0 = Instant::now();
         while !EXITED.load(Ordering::SeqCst) && t0.elapsed() < LIMIT {
             std::thread::sleep(Duration::from_millis(20));
         }
         DONE.store(true, Ordering::SeqCst);
+        let waited = t0.elapsed().as_millis();
+        let what = if EXITED.load(Ordering::SeqCst) { format!("the browser process exited after {waited} ms") } else { format!("the browser process had not exited after {waited} ms (limit reached)") };
+        format!("storage flush: closed {destroyed} of {} webviews; {what}", windows.len())
+    }
+
+    /// Why the exit doesn't wait, when it doesn't ("" once the wait has run: wait() said so).
+    pub fn skipped() -> &'static str {
+        if DONE.load(Ordering::SeqCst) { "" } else { "storage flush: not waiting (BrowserProcessExited could not be watched)" }
     }
 }
 #[cfg(not(windows))]
@@ -459,7 +485,12 @@ mod storage_flush {
     pub fn pending() -> bool {
         false
     }
-    pub fn wait(_: &tauri::AppHandle) {}
+    pub fn wait(_: &tauri::AppHandle) -> String {
+        String::new()
+    }
+    pub fn skipped() -> &'static str {
+        ""
+    }
 }
 
 pub fn run() {
@@ -520,6 +551,9 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 let cleanup = !state.cleaned_up.load(Ordering::SeqCst) && workers_running(app);
                 let flush = storage_flush::pending();
+                if !flush && !app.state::<AppState>().exiting.load(Ordering::SeqCst) {
+                    exit_note(app, storage_flush::skipped());
+                }
                 if cleanup || flush {
                     api.prevent_exit();
                     if state.exiting.swap(true, Ordering::SeqCst) {
@@ -531,7 +565,8 @@ pub fn run() {
                             finish_sessions(&h);
                             h.state::<AppState>().cleaned_up.store(true, Ordering::SeqCst);
                         }
-                        storage_flush::wait(&h);
+                        let flushed = storage_flush::wait(&h);
+                        exit_note(&h, &flushed);
                         h.state::<AppState>().exiting.store(false, Ordering::SeqCst);
                         h.exit(0);
                     });
