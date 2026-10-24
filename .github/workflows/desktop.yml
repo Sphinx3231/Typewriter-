@@ -140,31 +140,12 @@ jobs:
           "TW_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
       - name: The settings saved in v1.2.0 survived the upgrade
         run: node e2e-desktop/upgrade.mjs after "$env:TW_EXE" upgrade-state.json
-      - name: Diagnostic — the real profile, with no WebDriver attached
-        # The installed app started like a user starts it, with no WebDriver, then closed: its real
-        # profile then holds the keys it writes at startup (run 43: it did; WebDriver sessions
-        # had never written it). Also prints the exit's storage-flush line.
-        if: always() && env.TW_EXE != ''
-        continue-on-error: true
-        run: |
-          $p = Start-Process $env:TW_EXE -PassThru
-          Start-Sleep -Seconds 10
-          powershell -NoProfile -ExecutionPolicy Bypass -File e2e-desktop/win/input.ps1 sysclose Typewriter
-          if (-not $p.WaitForExit(20000)) { "did not exit by itself within 20 s"; Stop-Process -Id $p.Id -Force }
-          node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
-          $log = Get-ChildItem "$env:LOCALAPPDATA\app.typewriter.desktop" -Recurse -Filter typing-diagnostics.log -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($log) { Get-Content $log.FullName -Tail 2 }
-          "WebView2 profiles elsewhere (temporary ones the driver may use):"
-          Get-ChildItem $env:TEMP -Directory -Filter "scoped_dir*" -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName }
       - name: Settings changed just before closing are kept (the new app is closed at once, then reopened)
         run: |
           node e2e-desktop/upgrade.mjs before "$env:TW_EXE" close-state.json
           if ($LASTEXITCODE -ne 0) { throw "could not change settings in the new version" }
-          # Diagnostics, before reopening: which keys reached the disk, and what the exit logged
-          # (whether WebView2's browser process exited, or the wait's limit was reached).
+          # Which keys reached the disk before reopening (names only, never values).
           node e2e-desktop/storage-keys.mjs "$env:LOCALAPPDATA\app.typewriter.desktop"
-          $log = Get-ChildItem "$env:LOCALAPPDATA\app.typewriter.desktop" -Recurse -Filter typing-diagnostics.log -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($log) { "--- end of $($log.FullName):"; Get-Content $log.FullName -Tail 12 } else { "no typing-diagnostics.log found" }
           node e2e-desktop/upgrade.mjs check "$env:TW_EXE" close-state.json
           if ($LASTEXITCODE -ne 0) { throw "settings changed just before closing were lost" }
       - name: Build the Chrome extension (for the Opera check)

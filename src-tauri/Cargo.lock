@@ -4254,8 +4254,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "typewriter-native",
- "webview2-com",
- "windows-core 0.62.2",
 ]
 
 [[package]]

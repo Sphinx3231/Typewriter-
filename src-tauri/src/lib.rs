@@ -47,19 +47,6 @@ fn diag_append(path: &std::path::Path, line: &str) {
     }
 }
 
-/// One line about the app's exit (Windows: whether page storage had time to reach the disk).
-fn exit_note(app: &AppHandle, what: &str) {
-    if what.is_empty() {
-        return;
-    }
-    if let Some(path) = diag_path(app) {
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        diag_append(&path, &format!("\n=== {} UTC · exit · {what}", utc_now()));
-    }
-}
-
 /// Starts a session's section of the diagnostics file and returns its sink.
 fn diag_sink(app: &AppHandle, id: u64) -> DiagSink {
     let Some(path) = diag_path(app) else { return Box::new(|_: &str| {}) };
@@ -418,81 +405,6 @@ fn show_hud(app: &AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Windows: WebView2 writes the pages' storage (settings, theme, history) to disk a few seconds
-/// after a change, in its own browser process. If Typewriter exits before that process has shut
-/// down, a change made just before closing is lost. So the exit waits for it (BrowserProcessExited),
-/// with a time limit so closing can never hang.
-#[cfg(windows)]
-mod storage_flush {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::{Duration, Instant};
-    use tauri::{AppHandle, Manager};
-    use webview2_com::{BrowserProcessExitedEventHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2Environment5};
-    use windows_core::Interface;
-
-    static WATCHING: AtomicBool = AtomicBool::new(false);
-    static EXITED: AtomicBool = AtomicBool::new(false);
-    static DONE: AtomicBool = AtomicBool::new(false);
-    const LIMIT: Duration = Duration::from_secs(6);
-
-    pub fn watch(window: &tauri::WebviewWindow) {
-        let _ = window.with_webview(|w| {
-            let Ok(env) = w.environment().cast::<ICoreWebView2Environment5>() else { return };
-            let handler = BrowserProcessExitedEventHandler::create(Box::new(|_, _| {
-                EXITED.store(true, Ordering::SeqCst);
-                Ok(())
-            }));
-            let mut token = 0i64;
-            if unsafe { env.add_BrowserProcessExited(&handler, &mut token) }.is_ok() {
-                WATCHING.store(true, Ordering::SeqCst);
-            }
-        });
-    }
-
-    /// True while the exit still has to wait for the browser process.
-    pub fn pending() -> bool {
-        WATCHING.load(Ordering::SeqCst) && !DONE.load(Ordering::SeqCst)
-    }
-
-    /// Closes every webview (the browser process only shuts down once none is left), then waits
-    /// for it to exit. Runs off the event loop, which must keep running to deliver the event.
-    /// Returns what happened, for the diagnostics file.
-    pub fn wait(app: &AppHandle) -> String {
-        let windows = app.webview_windows();
-        let mut destroyed = 0;
-        for w in windows.values() {
-            if w.destroy().is_ok() {
-                destroyed += 1;
-            }
-        }
-        let t0 = Instant::now();
-        while !EXITED.load(Ordering::SeqCst) && t0.elapsed() < LIMIT {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        DONE.store(true, Ordering::SeqCst);
-        let waited = t0.elapsed().as_millis();
-        let what = if EXITED.load(Ordering::SeqCst) { format!("the browser process exited after {waited} ms") } else { format!("the browser process had not exited after {waited} ms (limit reached)") };
-        format!("storage flush: closed {destroyed} of {} webviews; {what}", windows.len())
-    }
-
-    /// Why the exit doesn't wait, when it doesn't ("" once the wait has run: wait() said so).
-    pub fn skipped() -> &'static str {
-        if DONE.load(Ordering::SeqCst) { "" } else { "storage flush: not waiting (BrowserProcessExited could not be watched)" }
-    }
-}
-#[cfg(not(windows))]
-mod storage_flush {
-    pub fn pending() -> bool {
-        false
-    }
-    pub fn wait(_: &tauri::AppHandle) -> String {
-        String::new()
-    }
-    pub fn skipped() -> &'static str {
-        ""
-    }
-}
-
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -510,10 +422,6 @@ pub fn run() {
             // The window starts hidden so there's no flash before the theme is applied.
             // The web app shows it after its first paint; this is a fallback.
             let handle = app.handle().clone();
-            #[cfg(windows)]
-            if let Some(main) = app.get_webview_window("main") {
-                storage_flush::watch(&main);
-            }
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(2500));
                 if let Some(main) = handle.get_webview_window("main") {
@@ -544,29 +452,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Typewriter")
         .run(|app, event| {
-            // Before the process ends, let typing threads stop and restore the keymap, and (on
-            // Windows) let the webviews' storage reach the disk. The exit is postponed (not
-            // blocked) and resumed once they are done.
+            // Before the process ends, let typing threads stop and restore the keymap.
+            // The exit is postponed (not blocked) and resumed once they are done.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let state = app.state::<AppState>();
-                let cleanup = !state.cleaned_up.load(Ordering::SeqCst) && workers_running(app);
-                let flush = storage_flush::pending();
-                if !flush && !app.state::<AppState>().exiting.load(Ordering::SeqCst) {
-                    exit_note(app, storage_flush::skipped());
-                }
-                if cleanup || flush {
+                if !state.cleaned_up.load(Ordering::SeqCst) && workers_running(app) {
                     api.prevent_exit();
                     if state.exiting.swap(true, Ordering::SeqCst) {
                         return; // already on its way out
                     }
                     let h = app.clone();
                     std::thread::spawn(move || {
-                        if cleanup {
-                            finish_sessions(&h);
-                            h.state::<AppState>().cleaned_up.store(true, Ordering::SeqCst);
-                        }
-                        let flushed = storage_flush::wait(&h);
-                        exit_note(&h, &flushed);
+                        finish_sessions(&h);
+                        h.state::<AppState>().cleaned_up.store(true, Ordering::SeqCst);
                         h.state::<AppState>().exiting.store(false, Ordering::SeqCst);
                         h.exit(0);
                     });
