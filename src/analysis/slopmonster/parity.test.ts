@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import corpus from "./parity-corpus.json";
 import expected from "./parity.json";
-import { audit, normalise, PROOF, rootPattern, slopScore, VOCAB, VOCAB_EXACT, type Category, type Hits } from ".";
+import { audit, hitsOf, locate, normalise, normaliseMapped, PROOF, rootPattern, slopScore, VOCAB, VOCAB_EXACT, type Category, type Hits } from ".";
 
 const groups = (text: string) => new Set((Object.keys(audit(normalise(text))) as Category[]).filter((k) => audit(normalise(text))[k].length > 0));
 
@@ -15,6 +15,37 @@ describe("the port reports exactly what SlopMonster's deslop.py reports", () => 
       if (JSON.stringify(got) !== JSON.stringify(expected.cases[i])) diffs.push(`#${i} ${JSON.stringify(text.slice(0, 60))}\n  python ${JSON.stringify(expected.cases[i])}\n  port   ${JSON.stringify(got)}`);
     });
     expect(diffs).toEqual([]);
+  });
+
+  it("locate() finds exactly those hits, on every input of the corpus, and says where each one is", () => {
+    const diffs: string[] = [];
+    corpus.forEach((text, i) => {
+      const found = locate(text);
+      const got = hitsOf(found);
+      if (JSON.stringify(got) !== JSON.stringify(expected.cases[i])) diffs.push(`#${i} ${JSON.stringify(text.slice(0, 60))}\n  python ${JSON.stringify(expected.cases[i])}\n  locate ${JSON.stringify(got)}`);
+      for (const h of found)
+        for (const [a, b] of h.ranges) {
+          expect(0 <= a && a <= b && b <= text.length, `#${i} ${h.rule} [${a}, ${b}]`).toBe(true);
+          // What the range covers is what the rule matched, once normalised.
+          const covered = normalise(text.slice(a, b)).toLowerCase();
+          if (h.category === "vocab" || h.category === "phrases") expect(covered.length, `#${i} ${h.rule}`).toBeGreaterThan(0);
+          if (h.category === "vocab") expect(covered, `#${i}`).toContain(h.rule.toLowerCase().replace(/(ed|ing|ly|e)$/, "").slice(0, 3));
+          if (h.category === "proof" || h.category === "rhythm") expect(normalise(text.slice(a, b)).startsWith(normalise(h.detail!).slice(0, 20)), `#${i} ${h.detail}`).toBe(true);
+        }
+    });
+    expect(diffs).toEqual([]);
+  });
+
+  it("normaliseMapped() is normalise(), and each unit comes from the character it was made from", () => {
+    for (const text of corpus) {
+      const { text: n, from } = normaliseMapped(text);
+      expect(n).toBe(normalise(text));
+      for (let k = 0; k < n.length; k++) {
+        const o = text[from[k]];
+        if (n[k] === " ") expect(/\s|[\x1c-\x1f\x85]/.test(o), JSON.stringify(o)).toBe(true);
+        else expect(o === n[k] || (o === "‑" && n[k] === "-") || (o === "’" && n[k] === "'")).toBe(true);
+      }
+    }
   });
 
   it("the corpus exercises every category and most rules", () => {

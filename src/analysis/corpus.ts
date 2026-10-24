@@ -1,13 +1,13 @@
 /**
- * Texts for calibrating the style checklist (calibration.test.ts).
+ * Sample texts for the writing analysis tests and the desktop harness.
  *
- * STYLED: written for this test in the stock register the checklist is meant to catch (stock
+ * STYLED: written for these tests in the stock register SlopMonster's checker looks for (stock
  * openers, buzzwords, "not just X, but Y", tidy lists of three). They were written by the
- * developers, not collected, so they show what the checks catch, not how often real text does.
+ * developers, not collected, so they show what the checks find, not how often real text has it.
  *
  * HUMAN: public-domain prose written long before text generators existed (Project Gutenberg):
  * Thoreau, Walden (1854); Hamilton, Madison and Jay, The Federalist Papers (1788); Austen, Pride
- * and Prejudice (1813); Twain, Adventures of Huckleberry Finn (1884). These must not be rewritten.
+ * and Prejudice (1813); Twain, Adventures of Huckleberry Finn (1884).
  */
 
 export const STYLED: Record<string, string> = {

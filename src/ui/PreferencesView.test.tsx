@@ -162,7 +162,7 @@ describe("PreferencesView", () => {
     expect(screen.getByTestId("build-id").textContent).toMatch(/^Build \S+/);
     // SlopMonster's MIT notice ships in the app, word for word.
     const { readFileSync } = await import("node:fs");
-    const license = readFileSync("src/humanize/slopmonster/LICENSE", "utf8");
+    const license = readFileSync("src/analysis/slopmonster/LICENSE", "utf8");
     expect(screen.getByTestId("notices").querySelector("pre")!.textContent).toBe(license);
     expect(screen.getByTestId("notices").textContent).toContain("SlopMonster by Jack Roberts");
     expect(screen.queryByTestId("copy-diagnostics")).toBeNull();

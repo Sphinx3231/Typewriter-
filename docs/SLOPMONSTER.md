@@ -1,6 +1,6 @@
 # SlopMonster in Typewriter
 
-SlopMonster's writing checker is built into the Humanization Studio's style checklist. This page records:
+SlopMonster's writing checker is Typewriter's writing analysis (SPEC §2a, §2b). It is the only engine: it reports findings and never changes the text. This page records:
 
 - what SlopMonster is;
 - what was taken from it, and what was not;
@@ -30,89 +30,70 @@ The video's claims were checked against the code. The table of what it checks ma
 | Rhythm | Two narrow shapes of a list of three ("faster, smarter, and better"; "trusted, reliable and built to last") |
 | Proof | A number next to a noun such as customers, users, teams or students ("10,000+ happy homeowners") |
 
-### Compared with what Typewriter already had
+## 2. What is used
 
-Typewriter's checklist (`src/humanize/index.ts`) already looked for repetition, redundancy, stock transitions and openers, wordy phrasing, even sentence lengths and vague statements. SlopMonster adds what it lacked:
-
-- marketing vocabulary;
-- the contrast and opener constructions;
-- dash and hyphen stacking;
-- lists of three;
-- unsupported numbers.
-
-Three overlaps exist:
-
-- "leverage" and "delve" are already counted under formal phrasing;
-- "in today's" is already counted as a generic opener;
-- "in conclusion / to sum up" is already counted as a generic conclusion.
-
-These are not counted twice. The diff and the Studio (`diff.ts`, `HumanizeStudio.tsx`) have no equivalent in SlopMonster: it has no diff, highlights or per-change restore.
-
-## 2. What was integrated
-
-| Taken | How |
+| Used | How |
 |---|---|
-| The whole checker (catalogue, `normalise`, `audit`) | Ported rule for rule to TypeScript: `src/humanize/slopmonster/index.ts`, with the MIT notice (`LICENSE` next to it, and shown in the app under Preferences › About › Open-source notices). Python's Unicode-aware `\w`, `\s`, `\d` and `\b`, and its code-point string lengths, are reproduced exactly |
-| Vocabulary, phrases, lists of three | Three new scored checks: "Overused buzzwords" (2 or more), "Stock phrases and constructions" (2 or more), "Tidy lists of three" (at least one per 150 words) |
-| Punctuation, proof | Two notes, never scored: "Dash, hyphen and semicolon habits" and "Numbers to double-check" |
-| Editing guidance (`prompts/cleanse.txt`) | Fixed local rules, only where the shorter wording means the same in any context: throat-clearing openers ("Here's the thing:", "The truth is,"), stacked hedges, padding ("very unique", "quite literally", "more than just"), "leverage" as a verb → "use", "harness the power of" → "use". Each Studio explanation names the rule and says "(SlopMonster)" |
+| The whole checker (catalogue, `normalise`, `audit`, score) | Ported rule for rule to TypeScript in `src/analysis/slopmonster/index.ts`, with the MIT notice. The notice is in `LICENSE` next to it, and the app shows it under Preferences › About › Open-source notices. Python's Unicode-aware `\w`, `\s`, `\d` and `\b`, and its code-point string lengths, are reproduced exactly |
+| Where each hit is | `locate()` reruns the same compiled patterns. Each hit is mapped back from the normalised text to the characters the user wrote: curly apostrophes, non-breaking hyphens, runs of spaces, tabs and line breaks, and CRLF. `hitsOf(locate(t))` must equal `audit(normalise(t))`; `analyze()` throws (an honest "Writing analysis failed") if it ever doesn't |
+| `--allow-proof` | Settings › "My number claims are backed up": proof findings stay listed, but no longer lower the score |
+| Explanations | From upstream's README ("What it checks") and `references/signs-of-ai-writing.md`, including its suggested fix for each construction (`src/analysis/index.ts`) |
 
-| Not taken | Why |
+| Not used | Why |
 |---|---|
-| The AI rewrite (`cleanse.sh`) | It sends the text to an AI model over the network. Typewriter runs entirely on the device, with no AI and no network (CLAUDE.md rule 2) |
-| Upstream's "any hit fails" scoring | It is made for short web pages; on essays and fiction it would fire constantly (see §3). Typewriter's checklist score and its 50% threshold are kept |
+| The AI rewrite (`cleanse.sh`, `prompts/cleanse.txt`) | It sends the text to an AI model over the network. Typewriter runs entirely on the device, with no AI and no network (CLAUDE.md rule 2) |
+| Any rewriting at all | Typewriter's earlier Smart Humanization rewrote text with fixed rules when its own checklist scored 50% or more. The checklist, the threshold and every rewrite rule were removed on 2026-10-24. What is typed is always the editor text |
 | HTML and Markdown readers, the CLI | Typewriter checks the plain text the user typed |
-| Rewriting buzzwords that have a literal sense ("seamless pipe", "foster care", "embark on a ship"), contrast constructions, lists of three, "helps you to" ("helps you to your seat"), "Let's break it down." (a box can be broken down) | No fixed rule can do these without changing meaning. The checklist reports them for the writer to judge |
 
-Nothing here tries to make text "undetectable". The checks look for wording that reads as padded or stock, and the score says nothing about who or what wrote the text.
+Not supported, and not imitated:
+- a revised text, side-by-side comparison or per-change restore (nothing is changed);
+- languages other than English (the patterns are English words);
+- any claim about who or what wrote a text. Nothing here tries to make text "undetectable".
 
-## 3. Calibration (`src/humanize/calibration.test.ts`)
+## 3. Test corpus (`src/analysis/corpus.ts`)
 
-Limits were set against two sets of text:
+The texts once used to calibrate the old checklist are kept as test inputs:
+- 40 public-domain passages, 145–450 words each, from Walden, The Federalist Papers, Pride and Prejudice and Huckleberry Finn;
+- 8 stock-register texts written for the tests.
 
-- **40 public-domain passages, 145–450 words each.** They come from Walden (1854), The Federalist Papers (1788), Pride and Prejudice (1813) and Huckleberry Finn (1884): human writing from before text generators existed.
-- **8 texts in the stock register.** We wrote these for the test; they are not collected data.
-
-| | Human passages (40) | Stock-register texts (8) |
-|---|---|---|
-| Buzzwords: most in one text | 1 | 3–12 |
-| Stock phrases: most in one text | 1 | 0–10 |
-| Lists of three: highest rate | 1 per 228 words | 1 per 47–122 words |
-| Dash, hyphen or semicolon finding | 13 of 40 | 1 of 8 |
-| Rewritten at 50% (before / after this change) | 0 / 0 | 1 / 2 |
-| Highest score | 20% | 60% |
-
-The punctuation finding fires more often on 19th-century prose than on the stock texts, so it is a note rather than a scored check.
-
-The 50% threshold is unchanged. On this data a 40% threshold would also rewrite 3 more of the stock texts (blog, report, e-mail) and still none of the human passages. That is a product decision for the owner, not something this data proves on its own: the stock texts are our own, and the human set is old fiction and essays.
+The parity and analysis tests run on all of them. There is no threshold left to calibrate: SlopMonster's score is reported as is.
 
 ## 4. Verification
 
-- **Port = original:** `parity.test.ts` compares the port with `deslop.py`'s own output on 152 inputs, and every hit must match exactly. The inputs are:
+- **Port = original:** `src/analysis/slopmonster/parity.test.ts` compares the port with `deslop.py`'s own output on 152 inputs, and every hit must match exactly. The same test checks that the located findings rebuild exactly that report. The inputs are:
   - every input of upstream's tests;
   - its README, examples and references;
-  - the calibration texts;
+  - the corpus texts;
   - Unicode and emoji edge cases (combining marks, RTL, Arabic-Indic and full-width digits, ſ and K, Turkish İ, Greek Σ);
   - CRLF line endings, tabs, non-breaking spaces and hyphens;
   - em-dashes on both sides of a 220-character window, including emoji windows.
 
   To regenerate the expected output: clone the upstream repository, then run `python3 -I scripts/slopmonster-parity.py <clone>`. Upstream's rule tests are also ported.
-- **Integration:** `slopmonster.test.ts` covers:
-  - each check, its limits and the double-count exclusions;
-  - notes never affecting the score;
-  - each rewrite rule, and the cases each must leave alone;
-  - protected quotations, citations, brackets and code;
-  - Studio explanations, with every change restoring on its own;
-  - CRLF, emoji and tabs;
-  - no network APIs touched.
-- **Browser:** Playwright runs Smart Humanization on a stock-register essay in Chromium and checks:
-  - the 13 checklist items and their SlopMonster marks;
-  - the "leverage" → "use" explanation;
-  - the typed text is exactly the prepared text.
-- **Packaged desktop app:** `e2e-desktop/run.mjs` ("SlopMonster's checks in the packaged app") checks:
-  - the installed app's checklist matches the engine, item by item;
-  - one SlopMonster change kept as original;
-  - the typed document equals exactly that mix.
+- **Analysis:** `src/analysis/analysis.test.ts` covers:
+  - findings equal to the checker's report;
+  - each finding pointing at its words, through curly quotes, non-breaking characters, CRLF, tabs and emoji;
+  - the punctuation rules;
+  - empty and blank text;
+  - explanations, the score and `--allow-proof`;
+  - no network API touched;
+  - overlapping highlights;
+  - 500,000-character and 800-paragraph documents;
+  - the worker service: a newer check ends the older one, and a crash or time-out fails honestly.
+- **UI:** `AnalysisStudio.test.tsx`, `useSession.test.tsx`, `SettingsPanel.test.tsx`, `App.test.tsx`.
+- **Browser:** Playwright (`e2e/app.spec.ts`, "Writing analysis (SlopMonster)") runs in Chromium and covers:
+  - the real findings, explanations, navigation, reviewed marks, copy and check again;
+  - exact typing with analysis on and off;
+  - Unicode and CRLF;
+  - toggling while typing;
+  - no request leaving the page's origin;
+  - both themes, and 11 window widths;
+  - long documents with the theme switch answered while checking.
+- **Packaged desktop app:** `e2e-desktop/run.mjs`, in the installed Linux app:
+  - every finding highlighted exactly where the checker puts it, in two texts;
+  - the panel's layout at two window sizes;
+  - explanations and the nested pick;
+  - exact typing into another app with typos on, analysis on and off;
+  - 500,000-character and 800-paragraph documents checked without freezing the app;
+  - a 10-paragraph document typed exactly.
 
-  The Windows end-to-end check confirms the five marked checks in the installed Windows app.
-- **Speed:** checking a 667,000-character book takes about 0.4 s, and a 500,000-character paragraph about 0.2 s. That is the same order as Typewriter's own checks.
+  `e2e-desktop/windows.mjs` runs the same highlight, layout and exact-typing checks in the installed Windows app.

@@ -1,11 +1,74 @@
 # Status
 
-_Last updated: 2026-10-23 (1.2.0 + Smart Humanization + Humanization Studio + SlopMonster checks on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-24 (1.2.0 + writing analysis with SlopMonster's checker on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
 - Latest audit and gap analysis: [`DESKTOP-AUDIT.md`](DESKTOP-AUDIT.md)
 - Chrome extension (**deferred**, not published): [`EXTENSION.md`](EXTENSION.md)
+
+## Writing analysis replaces Smart Humanization (2026-10-24, local commit, not pushed, not merged, not released)
+
+SlopMonster's offline checker is now the only engine, and it never changes the text. See SPEC §2a/§2b and [`SLOPMONSTER.md`](SLOPMONSTER.md). The sections below this one, about Smart Humanization, the Humanization Studio and the checklist, describe features that no longer exist and are kept as history.
+
+- **Removed:**
+  - the checklist and its 50% threshold;
+  - every rewrite rule;
+  - the word diff, side by side and per-change restore;
+  - the tone setting;
+  - `src/humanize/`, `HumanizeStudio.tsx` and `HumanizeStatus.tsx`.
+
+  What is typed is always exactly the editor text, with the analysis on or off.
+- **Added:**
+  - `src/analysis/`: the ported checker, plus `locate()`, which puts each hit at the characters the user wrote;
+  - a Web Worker service, with a main-thread fallback, a 30 s limit and honest errors;
+  - `AnalysisStatus.tsx` and `AnalysisStudio.tsx` (highlights, findings list, explanations, reviewed marks, Copy text, Check again);
+  - Settings › Writing analysis ("Check writing style", "My number claims are backed up" = `--allow-proof`).
+
+  An older version's Smart Humanization choice carries over as writing analysis on.
+- **Large documents:** the old stack overflow (`push(...spread)` in the diff) and the diff's slow cases went away with the diff itself. Highlights are cut in one linear sweep (`segments()`), with no recursion and no spreads. The check runs off the main thread, and a newer text ends the older check's worker.
+- **Not supported (documented, not imitated):**
+  - rewriting of any kind, and SlopMonster's AI rewrite (`cleanse.sh`);
+  - languages other than English;
+  - any claim about authorship or detectors.
+- **Not changed:** CLAUDE.md rule 3 still describes the Smart Humanization exception. Nothing uses it any more. Removing it is the owner's call.
+
+### Tests (2026-10-24)
+
+- **Unit** (Vitest): **770/770**; lint (tsc) clean. The 500,000-character paragraph is checked and cut for highlighting in about 0.65 s in Node, and the 800-paragraph document (333,541 characters, CRLF) in about 0.36 s. The parity test is unchanged: identical to `deslop.py` on 152 inputs, and the located findings rebuild that report exactly.
+- **Browser** (Playwright, Chromium): **45/45** on the final code. The first run had 2 failures, both fixed in the UI rather than the tests:
+  - "Check again" lost its confirmation because the panel is hidden while re-checking. The panel now confirms when the new result arrives.
+  - The finding position wasn't formatted like the headline ("1335" vs "1,335").
+
+  Long documents in the browser:
+
+  | Document | Findings | Theme switch answered while checking | Panel shown after |
+  |---|---|---|---|
+  | 800 paragraphs (157,261 characters) | 1,335 | 169 ms | 7.0 s |
+  | 500,000-character paragraph | 4,270 | 125 ms | 2.4 s |
+
+- **Chrome extension** (`npm run test:extension`): first run 29/30. "text is progressive, not pasted at once" failed in the test fixture's `chrome.windows.create` call, before Typewriter's page opened, while a Rust release build was using the CPU. The rerun passed **30/30**. That test doesn't turn on writing analysis.
+- **Native** (`npm run test:native`): **97/97**.
+- **Packaged Linux app** (`.deb` built locally, installed with dpkg, `e2e-desktop/run.mjs` under Xvfb): **27/27** on the final harness.
+  - The earlier run of the same build was 25/27. Both failures were harness bugs, not app faults:
+    - WebDriver returns `null`, not `undefined`, for a missing element.
+    - The old 500k sample has no SlopMonster findings: the app correctly said "Nothing to review", but the harness waited for "0 findings".
+  - In the installed app:
+    - every finding is highlighted exactly where the checker puts it (5 in the sample, 22 in an essay with curly quotes and accents);
+    - the panel fits at 1360 and 1050 px with no overflow;
+    - explanations and the nested pick work;
+    - with typos on, the text is typed into another app exactly, with the analysis on and off;
+    - a 498,000-character paragraph (6,000 findings, shown after 9.7 s; UI round trip 191 ms while checking) and an 800-paragraph essay (471,200 characters, 4,000 findings, 9.9 s; 48 ms) can be navigated, and **Copy text** gives exactly the text;
+    - a 10-paragraph document is typed exactly.
+- **Windows installer (cross-built on Linux from this code):** `src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/Typewriter_1.2.0_x64-setup.exe`.
+  - Version 1.2.0, 3,075,408 bytes, SHA-256 `a19c6b7ce99b7557ba9016f4c569e0198fa6e21c476240724db229760a43cec2`.
+  - Unsigned, GNU target, built with `npx tauri build --target x86_64-pc-windows-gnu --bundles nsis`. It ships `WebView2Loader.dll`.
+  - **Checked:** extracted with 7-Zip, it contains this build's `typewriter.exe`, the same size and differing only in Tauri's 3-byte bundle-type marker.
+  - **Not checked:**
+    - a Wine launch of the extracted exe showed no window within 50 s, in two tries (WebView2 isn't available under Wine);
+    - it has not been installed or run on Windows.
+
+    So install, launch, writing analysis and typing on Windows are unverified for this file. `e2e-desktop/windows.mjs` was updated for writing analysis, but it runs only in CI after a push, which hasn't been approved. The MSVC installer that CI builds is the one the Windows end-to-end job verifies.
 
 ## SlopMonster's checks in the Humanization Studio (2026-10-23, not merged, not released)
 

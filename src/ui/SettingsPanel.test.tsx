@@ -32,7 +32,7 @@ type Harness = {
   status?: PlaybackStatus;
   est?: Partial<Estimate>;
   script?: Partial<Script>;
-  humanize?: { enabled: boolean; tone?: string };
+  analysis?: { enabled: boolean; allowProof?: boolean };
 };
 
 /**
@@ -41,7 +41,7 @@ type Harness = {
  * fields to reach states that need very specific numbers.
  */
 function setup(h: Harness = {}) {
-  const spies = { set: vi.fn(), applyDuration: vi.fn(), newVariation: vi.fn(), setHumanize: vi.fn(), setTone: vi.fn() };
+  const spies = { set: vi.fn(), applyDuration: vi.fn(), newVariation: vi.fn(), setAnalysis: vi.fn(), setAllowProof: vi.fn() };
   let latest: Session = null as unknown as Session;
   function Live() {
     const text = h.text ?? TEXT;
@@ -61,7 +61,7 @@ function setup(h: Harness = {}) {
       script: { ...script, ...h.script },
       applyDuration: spies.applyDuration,
       newVariation: spies.newVariation,
-      humanize: { enabled: false, tone: "any", ...h.humanize, setEnabled: spies.setHumanize, setTone: spies.setTone },
+      analysis: { enabled: false, allowProof: false, ...h.analysis, setEnabled: spies.setAnalysis, setAllowProof: spies.setAllowProof },
     } as unknown as Session;
     latest = session;
     return <SettingsPanel session={session} />;
@@ -439,31 +439,33 @@ describe("variation seed", () => {
   });
 });
 
-describe("Smart Humanization settings", () => {
-  const toggle = () => screen.getByRole("switch", { name: /Smart Humanization/ });
+describe("Writing analysis settings", () => {
+  const toggle = () => screen.getByRole("switch", { name: /Check writing style/ });
 
   it("is off by default, explains itself honestly, and turns on with one click", async () => {
-    const { setHumanize } = setup();
-    const group = screen.getByTestId("humanize-settings");
+    const { setAnalysis } = setup();
+    const group = screen.getByTestId("analysis-settings");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
-    expect(within(group).getByText(/A style heuristic, not an AI detector\. Runs on this device\./)).toBeTruthy();
-    expect(within(group).queryByRole("radiogroup", { name: "Tone to aim for" })).toBeNull();
+    expect(within(group).getByText(/SlopMonster, an open-source style checker/)).toBeTruthy();
+    expect(within(group).getByText(/It never changes your text\. Runs on this device; nothing is sent anywhere\./)).toBeTruthy();
+    expect(within(group).queryByRole("switch", { name: /number claims/ })).toBeNull();
     await userEvent.click(toggle());
-    expect(setHumanize).toHaveBeenCalledWith(true);
+    expect(setAnalysis).toHaveBeenCalledWith(true);
   });
 
-  it("when on, offers the tone and can be turned off", async () => {
-    const { setHumanize, setTone } = setup({ humanize: { enabled: true, tone: "any" } });
+  it("when on, offers SlopMonster's --allow-proof option, and can be turned off", async () => {
+    const { setAnalysis, setAllowProof } = setup({ analysis: { enabled: true } });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
-    expect(checked("Any")).toBe(true);
-    await userEvent.click(radio("Formal"));
-    expect(setTone).toHaveBeenCalledWith("formal");
+    const proof = screen.getByRole("switch", { name: /My number claims are backed up/ });
+    expect(proof.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(proof);
+    expect(setAllowProof).toHaveBeenCalledWith(true);
     await userEvent.click(toggle());
-    expect(setHumanize).toHaveBeenCalledWith(false);
+    expect(setAnalysis).toHaveBeenCalledWith(false);
   });
 
-  it.each<PlaybackStatus>(["playing", "paused"])("can't be switched while %s", (status) => {
-    setup({ status, humanize: { enabled: true } });
-    expect((toggle() as HTMLButtonElement).disabled).toBe(true);
+  it.each<PlaybackStatus>(["playing", "paused"])("can be switched while %s: it never changes what is typed", (status) => {
+    setup({ status, analysis: { enabled: true } });
+    expect((toggle() as HTMLButtonElement).disabled).toBe(false);
   });
 });

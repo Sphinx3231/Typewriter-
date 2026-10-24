@@ -117,20 +117,21 @@ Use the same text with a 60 s duration.
 
 Send back: pass/fail per row, and a screenshot of anything that didn't match.
 
-## 2a. Smart Humanization (optional feature, off by default)
+## 2a. Writing analysis (optional feature, off by default)
 
 Use **Into another app** with Notepad (or a Google Doc), 20 s, typing mistakes Medium.
 
 | # | Do this | Expected |
 |---|---|---|
-| 2a.1 | With Smart Humanization **off** (Settings), paste a formal essay (the sample below) and type it. | The document gets exactly what you pasted. No humanization line appears under the editor. |
-| 2a.2 | Turn Smart Humanization **on**, paste the same essay again. | Within a moment the line under the editor says "Humanized automatically" with a score (for example 71%). No dialog, no button to approve. |
-| 2a.3 | Press **Review the changes** under the status line (it scrolls to the **Humanization Studio** panel below); then open **Style checks**. | Changed words are highlighted in the text (underlined, struck through or boxed), with a summary like "9 changes · 26 words changed · 5 sentences adjusted". Every check is listed under Style checks, with a note that it is a style heuristic, not a detector. |
-| 2a.4 | Press the down arrow (next change) a few times, then try **Side by side**, **Original**, **Highlights**, and **All text / Changes only**. | The selected change stays selected in every view, and each one shows a short reason. On a normal-size window Side by side shows original and revised next to each other, with no sideways scrolling. Turning highlights off shows the plain text. |
-| 2a.5 | Select a change and press **Keep the original wording**. Type it, copy the document, press **Check copied text**. | Verified. The document equals the Final text view (highlights off) exactly, with that one change back to your wording. |
-| 2a.6 | Press **Restore original**, type again. | The document equals your original exactly. |
-| 2a.7 | Paste a short or casual paragraph (a few lines about your day). | "No changes needed" or "Too short to check"; it types exactly what you pasted. |
-| 2a.8 | Start a session and try the switch, **Keep the original wording** and **Re-run** while typing. | They are disabled until the session ends; the arrows and Copy still work. |
+| 2a.1 | With **Check writing style** **off** (Settings › Writing analysis), paste the sample essay below and type it. | The document gets exactly what you pasted. No analysis line appears under the editor. |
+| 2a.2 | Turn **Check writing style** **on**. | Within a moment the line under the editor says "N findings to review", with a SlopMonster score out of 5 and "Your text is typed exactly as written." Your text in the editor doesn't change. |
+| 2a.3 | Press **Review the findings**. | It scrolls to the **Writing analysis** panel. Your text is shown as written, with words such as "leverage", "In today's" and "fast-paced" highlighted, and a note that nothing there changes your text. |
+| 2a.4 | Click "leverage", then use the down arrow (or Alt+↓) a few times; switch to **Findings**, and turn **Highlights** off and on. | Each finding shows its category, "SlopMonster rule: …" and an explanation. The Findings view lists every finding with its words. With highlights off, the plain text is shown. Nothing scrolls sideways. |
+| 2a.5 | Select a finding and press **Mark as reviewed**; then **Check again**. | The finding is dimmed and the summary counts "1 reviewed". After Check again, the panel says "Checked your text again." and the mark is cleared. |
+| 2a.6 | Type the essay with the analysis on. Copy the document, press **Check copied text**. | Verified: the document equals your text exactly. |
+| 2a.7 | Paste a short, plain paragraph (a few lines about your day). | "Nothing to review" (score 5/5); it types exactly what you pasted. |
+| 2a.8 | Start a session, then turn **Check writing style** off and on while typing. | Typing goes on and the document still gets exactly your text. |
+| 2a.9 | Optional: turn off Wi-Fi (or unplug the network) and repeat 2a.2. | It works the same: nothing is sent anywhere. |
 
 Sample essay: *In today's fast-paced world, technology plays a crucial role in education. Moreover, students utilize various digital tools in order to learn more effectively. Furthermore, teachers leverage numerous platforms in order to facilitate learning for every student. Additionally, it is important to note that schools commence new programs every year (Smith, 2021). In conclusion, technology plays a crucial role in education.*
 

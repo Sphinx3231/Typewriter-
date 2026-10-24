@@ -189,6 +189,192 @@ export function audit(text: string): Hits {
   return hits;
 }
 
+// ---- where the hits are (Typewriter's addition; upstream only reports them) ----
+
+/** One hit of one rule, found where `audit` finds it, with its place in the text before normalising. */
+export interface Located {
+  category: Category;
+  /** As in Hits: the word (vocab), the label (phrases), the rule (punctuation, rhythm), or "claim" (proof). */
+  rule: string;
+  /** As in Hits: the detail audit() reports for punctuation, rhythm and proof hits. */
+  detail?: string;
+  /** [start, end) in UTF-16 units of the text passed to `locate`. */
+  ranges: [number, number][];
+  /** Which pattern of its list found it (two phrase patterns share a label, as upstream). */
+  pattern: number;
+}
+
+let spaceTable: Uint8Array | null = null;
+/** True for Python's whitespace (S), by UTF-16 unit: every such character is in the BMP. */
+function isSpace(unit: number): boolean {
+  if (!spaceTable) {
+    spaceTable = new Uint8Array(65536);
+    const one = new RegExp(`^${S}$`, "u");
+    for (let u = 0; u < 65536; u++) if (u < 0xd800 || u > 0xdfff) spaceTable[u] = one.test(String.fromCharCode(u)) ? 1 : 0;
+  }
+  return spaceTable[unit] === 1;
+}
+
+/**
+ * `normalise(t)`, and for each of its UTF-16 units the unit of `t` it came from: a run of
+ * whitespace becomes one space that comes from the run's first character.
+ */
+export function normaliseMapped(t: string): { text: string; from: Int32Array } {
+  const out: string[] = [];
+  const from = new Int32Array(t.length);
+  let n = 0;
+  let space = false;
+  for (let i = 0; i < t.length; i++) {
+    const u = t.charCodeAt(i);
+    if (isSpace(u)) {
+      if (!space) {
+        out.push(" ");
+        from[n++] = i;
+        space = true;
+      }
+      continue;
+    }
+    space = false;
+    out.push(u === 0x2011 ? "-" : u === 0x2019 ? "'" : t[i]);
+    from[n++] = i;
+  }
+  let a = 0;
+  let b = n;
+  if (b > 0 && out[0] === " ") a = 1;
+  if (b > a && out[b - 1] === " ") b--;
+  return { text: out.slice(a, b).join(""), from: from.slice(a, b) };
+}
+
+/**
+ * Every hit `audit(normalise(original))` reports, each with where it is in `original`. Runs the
+ * same compiled rules in the same order, on the same normalised and lower-cased text, and maps
+ * the positions back. `hitsOf(locate(t))` equals `audit(normalise(t))` (checked by the tests on
+ * the whole parity corpus).
+ */
+export function locate(original: string): Located[] {
+  const { text, from } = normaliseMapped(original);
+  const low = text.toLowerCase();
+  // Where each unit of `low` came from in `text`, and where that character ends. Lower-casing can
+  // change a character's length (İ → i̇), never across characters.
+  const lowFrom = new Int32Array(low.length);
+  const lowEnd = new Int32Array(low.length);
+  let j = 0;
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)!;
+    const width = cp > 0xffff ? 2 : 1;
+    const l = String.fromCodePoint(cp).toLowerCase().length;
+    for (let k = 0; k < l && j < low.length; k++, j++) {
+      lowFrom[j] = i;
+      lowEnd[j] = i + width;
+    }
+    i += width;
+  }
+  if (j !== low.length) throw new Error("SlopMonster: could not map the lower-cased text back to the original");
+  /** [a, b) in `text` → in `original`. */
+  const back = (a: number, b: number): [number, number] => (b <= a ? [from[a] ?? original.length, from[a] ?? original.length] : [from[a], from[b - 1] + 1]);
+  /** [a, b) in `low` → in `original`. */
+  const backLow = (a: number, b: number): [number, number] => (b <= a ? back(lowFrom[a] ?? text.length, lowFrom[a] ?? text.length) : back(lowFrom[a], lowEnd[b - 1]));
+  /** The range of `text` [a, b) without leading and trailing whitespace, as Python's strip(). */
+  const trimmed = (a: number, b: number): [number, number] => {
+    while (a < b && isSpace(text.charCodeAt(a))) a++;
+    while (b > a && isSpace(text.charCodeAt(b - 1))) b--;
+    return [a, b];
+  };
+  const out: Located[] = [];
+
+  VOCAB_RES.forEach((r, i) => {
+    for (const m of low.matchAll(r)) out.push({ category: "vocab", rule: VOCAB[i], ranges: [backLow(m.index, m.index + m[0].length)], pattern: i });
+  });
+  EXACT_RES.forEach((r, i) => {
+    for (const m of low.matchAll(r)) out.push({ category: "vocab", rule: VOCAB_EXACT[i], ranges: [backLow(m.index, m.index + m[0].length)], pattern: VOCAB.length + i });
+  });
+  PHRASE_RES.forEach(([r, label], i) => {
+    for (const m of low.matchAll(r)) out.push({ category: "phrases", rule: label, ranges: [backLow(m.index, m.index + m[0].length)], pattern: i });
+  });
+
+  // Sentences as `text.split(SENTENCE_SPLIT)` cuts them, then 220-code-point windows.
+  const sentences: [number, number][] = [];
+  let start = 0;
+  for (const m of text.matchAll(re(SENTENCE_SPLIT.source))) {
+    sentences.push([start, m.index]);
+    start = m.index + m[0].length;
+  }
+  sentences.push([start, text.length]);
+  const windows = ([s, e]: [number, number]) => {
+    const w: [number, number][] = [];
+    let i = s;
+    do {
+      let k = i;
+      for (let c = 0; k < e && c < 220; c++) k += text.codePointAt(k)! > 0xffff ? 2 : 1;
+      w.push([i, k]);
+      i = k;
+    } while (i < e);
+    return w;
+  };
+  for (const s of sentences) {
+    for (const [a, b] of windows(s)) {
+      const w = text.slice(a, b);
+      if (count(/—/g, w) >= 2) {
+        const [x, y] = trimmed(a, b);
+        out.push({ category: "punctuation", rule: "two or more em-dashes in one sentence", detail: strip70(w), ranges: [back(x, y)], pattern: 0 });
+        break;
+      }
+    }
+  }
+  for (const s of sentences) {
+    for (const [a, b] of windows(s)) {
+      const found = [...text.slice(a, b).matchAll(COMPOUND_RE)];
+      if (found.length >= COMPOUND_FLOOR) {
+        out.push({
+          category: "punctuation",
+          rule: `${found.length} hyphenated compounds stacked in one sentence`,
+          detail: found.slice(0, 4).map((m) => m[0]).join(", "),
+          ranges: found.map((m) => back(a + m.index, a + m.index + m[0].length)),
+          pattern: 1,
+        });
+        break;
+      }
+    }
+  }
+  const semis: [number, number][] = [];
+  for (let i = text.indexOf(";"); i !== -1; i = text.indexOf(";", i + 1)) semis.push(back(i, i + 1));
+  if (semis.length > Math.max(3, Math.floor(points(text).length / 1200))) out.push({ category: "punctuation", rule: "semicolon-heavy for web copy", detail: `${semis.length} found`, ranges: semis, pattern: 2 });
+
+  RHYTHM.forEach((r, i) => {
+    for (const m of text.matchAll(r)) out.push({ category: "rhythm", rule: "rule-of-three list", detail: points(m[0]).slice(0, 60).join(""), ranges: [back(m.index, m.index + m[0].length)], pattern: i });
+  });
+
+  for (const m of text.matchAll(PROOF_RE)) {
+    const [x, y] = trimmed(m.index, m.index + m[0].length);
+    out.push({ category: "proof", rule: "claim", detail: text.slice(x, y), ranges: [back(x, y)], pattern: 0 });
+  }
+  return out;
+}
+
+/** The em-dash rule's detail: the window's first 70 code points, stripped. */
+function strip70(w: string): string {
+  return points(w).slice(0, 70).join("").replace(new RegExp(`^${S}+|${S}+$`, "gu"), "");
+}
+
+/** The Hits `audit` reports, rebuilt from located hits (same order, same counts and details). */
+export function hitsOf(located: Located[]): Hits {
+  const hits: Hits = { vocab: [], phrases: [], punctuation: [], rhythm: [], proof: [] };
+  // One [rule, occurrences] entry per pattern that found anything, in pattern order (as audit).
+  let last: Located | null = null;
+  const tally = (list: [string, number][], h: Located) => {
+    if (last && last.category === h.category && last.pattern === h.pattern) list[list.length - 1][1]++;
+    else list.push([h.rule, 1]);
+  };
+  for (const h of located) {
+    if (h.category === "vocab") tally(hits.vocab, h);
+    else if (h.category === "phrases") tally(hits.phrases, h);
+    else if (h.category === "proof") hits.proof.push(h.detail!);
+    else hits[h.category].push([h.rule, h.detail!]);
+    last = h;
+  }
+  return hits;
+}
+
 /** Upstream's score out of 5: one point off per category with a hit (proof can be made advisory). */
 export function slopScore(hits: Hits, allowProof = false): number {
   const failed = CATEGORIES.filter((k) => hits[k].length > 0 && !(allowProof && k === "proof"));

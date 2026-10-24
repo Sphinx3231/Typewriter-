@@ -83,8 +83,8 @@
   --fix-bg: rgba(37, 99, 235, 0.16);
   --selection: rgba(124, 58, 237, 0.18);
 
-  /* Humanization Studio: added/reworded = blue + underline, removed = purple + strikethrough,
-     punctuation/spacing = amber dotted box. Never color alone. */
+  /* Writing analysis highlights: words and phrases = blue + underline, number claims = purple
+     tint, punctuation and list shapes = amber dotted box. Never color alone. */
   --diff-add-bg: #e3ebfd;
   --diff-add-text: #1e3a8a;
   --diff-add-line: #1d4ed8;

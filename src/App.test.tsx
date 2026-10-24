@@ -47,23 +47,30 @@ afterEach(() => {
 });
 
 describe("App (browser preview)", () => {
-  it("shows the Humanization Studio as its own panel in the workspace grid, between the text panels and Settings", async () => {
-    const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("./humanize/fixtures");
-    localStorage.setItem("typewriter:prefs", JSON.stringify({ smartHumanize: true }));
+  it("shows the writing analysis as its own panel in the workspace grid, between the text panels and Settings, with the text exactly as typed", async () => {
+    const { ROBOTIC } = await import("./analysis/fixtures");
+    localStorage.setItem("typewriter:prefs", JSON.stringify({ writingAnalysis: true }));
     renderApp();
     expect(screen.queryByTestId("studio")).toBeNull();
     typeText(ROBOTIC);
+    await act(async () => {
+      vi.advanceTimersByTime(1); // the checker runs after a tick (no Worker in jsdom)
+    });
     const studio = screen.getByTestId("studio");
     expect(studio.parentElement!.className).toContain("workspace__grid");
-    // Reading and tab order: the text panels, then the Studio, then Settings.
+    // Reading and tab order: the text panels, then the analysis, then Settings.
     expect(studio.previousElementSibling!.className).toContain("workspace__texts");
     expect(studio.nextElementSibling!.className).toContain("settings");
     // A top-level panel like Your text, Playback and Settings: an h2 under the page's h1.
-    expect(within(studio).getByRole("heading", { level: 2 }).textContent).toContain("Humanization Studio");
+    expect(within(studio).getByRole("heading", { level: 2 }).textContent).toContain("Writing analysis");
     expect(studio.closest(".editor")).toBeNull();
     expect(editor().value).toBe(ROBOTIC);
+    // The highlighted text is the text itself, character for character, with highlights on and off.
+    expect(screen.getByTestId("studio-text").textContent).toBe(ROBOTIC);
+    expect(screen.getByTestId("studio-text").querySelectorAll(".find").length).toBeGreaterThan(3);
     fireEvent.click(screen.getByTestId("studio-highlight"));
-    expect(screen.getByTestId("studio-revised-text").textContent).toBe(ROBOTIC_HUMANIZED);
+    expect(screen.getByTestId("studio-text").textContent).toBe(ROBOTIC);
+    expect(screen.getByTestId("studio-text").querySelectorAll(".find").length).toBe(0);
   });
 
   it("shows the version being run in the sidebar (from package.json, never a hard-coded one)", async () => {

@@ -438,290 +438,247 @@ test("browser preview explains that typing into other apps needs the extension o
   await expect(page.getByRole("radiogroup", { name: "Where to type" })).toHaveCount(0);
 });
 
-test.describe("Smart Humanization", () => {
-  test("on: pasted text is checked and humanized automatically, and the copy is typed exactly; off: the exact original", async ({ page, context }) => {
-    const { ROBOTIC, ROBOTIC_HUMANIZED, NATURAL } = await import("../src/humanize/fixtures");
+test.describe("Writing analysis (SlopMonster)", () => {
+  const toggle = (page: Page) => page.getByRole("switch", { name: /Check writing style/ });
+  const studioText = (page: Page) => page.getByTestId("studio-text").evaluate((el) => el.textContent ?? "");
+
+  test("off by default; on, pasted text is checked automatically and its real findings are highlighted on the text itself; the text is typed exactly, on or off", async ({ page, context }) => {
+    const { ROBOTIC, NATURAL } = await import("../src/analysis/fixtures");
+    const { analyze } = await import("../src/analysis");
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await setDuration(page, 0, 4);
-    const toggle = page.getByRole("switch", { name: /Smart Humanization/ });
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+    await setText(page, ROBOTIC);
+    await expect(page.getByTestId("analysis-status")).toHaveCount(0);
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
 
     // A real paste into the editor: no button to press, no dialog.
+    await setText(page, "");
     await page.evaluate((t) => navigator.clipboard.writeText(t), ROBOTIC);
     await page.getByTestId("editor").focus();
     await page.keyboard.press("ControlOrMeta+V");
     await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
+    const a = analyze(ROBOTIC);
+    await expect(page.getByTestId("analysis-headline")).toHaveText(`${a.findings.length} findings to review`);
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    // The Studio shows both versions (highlights off: the plain texts).
-    await page.getByTestId("studio-highlight").click();
-    await expect(page.getByTestId("studio-revised-text")).toHaveText(ROBOTIC_HUMANIZED, { useInnerText: false });
-    expect(await page.getByTestId("studio-revised-text").evaluate((el) => el.textContent)).toBe(ROBOTIC_HUMANIZED);
-    await page.getByRole("radio", { name: /Original/ }).click();
-    expect(await page.getByTestId("studio-original-text").evaluate((el) => el.textContent)).toBe(ROBOTIC);
+    // The panel shows the text itself, character for character, with each finding at its words.
+    expect(await studioText(page)).toBe(ROBOTIC);
+    const shown = await page.getByTestId("studio-text").locator("button.find").evaluateAll((els) => els.map((e) => [e.textContent, (e as HTMLElement).dataset.f]));
+    for (const f of a.findings) expect(shown.filter(([, ids]) => ids!.split(" ").includes(String(f.id))).map(([t]) => t).join(""), f.rule).toBe(f.ranges.map(([x, y]) => ROBOTIC.slice(x, y)).join(""));
 
-    await page.getByTestId("btn-start").click();
-    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
-    expect(await output(page)).toBe(ROBOTIC_HUMANIZED);
-    await expect(page.getByTestId("verified-badge")).toBeVisible();
-    // The editor still holds the untouched original.
-    await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
-
-    // Type the original instead, without turning the feature off.
-    await page.getByTestId("humanize-restore").click();
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Typing your original");
     await page.getByTestId("btn-start").click();
     await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
     expect(await output(page)).toBe(ROBOTIC);
+    await expect(page.getByTestId("verified-badge")).toBeVisible();
+    await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
 
-    // Natural writing scores below 50% and is left alone.
+    // Nothing to find: said so, and typed as written.
     await setText(page, NATURAL);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("No changes needed");
+    await expect(page.getByTestId("analysis-headline")).toHaveText("Nothing to review");
+    await expect(page.getByTestId("studio")).toHaveCount(0);
     await page.getByTestId("btn-start").click();
     await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
     expect(await output(page)).toBe(NATURAL);
 
-    // Off: exact-source typing, and the setting survives a reload.
-    await setText(page, ROBOTIC);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
+    // The setting survives a reload; off again: no checking, exact typing.
     await page.reload();
-    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toHaveAttribute("aria-checked", "true");
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+    await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+    await toggle(page).click();
     await setText(page, ROBOTIC);
-    await expect(page.getByTestId("humanize-status")).toHaveCount(0);
+    await expect(page.getByTestId("analysis-status")).toHaveCount(0);
+    await expect(page.getByTestId("studio")).toHaveCount(0);
     await page.getByTestId("btn-start").click();
     await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
     expect(await output(page)).toBe(ROBOTIC);
   });
 
-  test("the switch is locked while typing, so the text never changes mid-session", async ({ page }) => {
-    const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("../src/humanize/fixtures");
+  test("findings: select, explanation from SlopMonster's guidance, navigation, reviewed marks, the list, copy and check again", async ({ page, context }) => {
+    const { STYLED } = await import("../src/analysis/corpus");
+    const { analyze, explain } = await import("../src/analysis");
+    const text = STYLED.essay;
+    const a = analyze(text);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await toggle(page).click();
+    await setText(page, text);
+    const studio = page.getByTestId("studio");
+    await expect(studio).toBeVisible();
+    await expect(page.getByTestId("studio-summary")).toContainText(`${a.findings.length} findings in`);
+
+    const lev = a.findings.find((f) => f.excerpt === "leverage")!;
+    await studio.locator("button.find", { hasText: /^leverage$/ }).click();
+    await expect(page.getByTestId("studio-pos")).toHaveText(`Finding ${lev.id + 1} of ${a.findings.length}`);
+    await expect(page.getByTestId("studio-reason")).toHaveText(explain(lev));
+    await page.getByTestId("studio-next").click();
+    await expect(page.getByTestId("studio-reason")).toHaveText(explain(a.findings[lev.id + 1]));
+    await page.keyboard.press("Alt+ArrowUp");
+    await expect(page.getByTestId("studio-pos")).toHaveText(`Finding ${lev.id + 1} of ${a.findings.length}`);
+
+    await page.getByTestId("studio-review").click();
+    await expect(page.getByTestId("studio-summary")).toContainText("; 1 reviewed");
+    await expect(studio.locator("button.find.is-reviewed", { hasText: /^leverage$/ })).toHaveCount(1);
+    await page.getByRole("radio", { name: "Findings" }).click();
+    await expect(page.getByTestId("studio-list").locator("button[data-item]")).toHaveCount(a.findings.length);
+    await expect(page.getByTestId("studio-list").locator(`button[data-item="${lev.id}"]`)).toContainText("reviewed");
+    await page.getByRole("radio", { name: "Your text" }).click();
+
+    await page.getByTestId("studio-copy").click();
+    await expect(page.getByTestId("studio-note")).toHaveText("Copied your text.");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+    await page.getByTestId("studio-rerun").click();
+    await expect(page.getByTestId("studio-note")).toHaveText("Checked your text again.");
+    await expect(page.getByTestId("studio-summary")).not.toContainText("reviewed");
+    expect(await studioText(page)).toBe(text);
+  });
+
+  test("Unicode, emoji, curly quotes, tabs and Windows line breaks: found in place, typed exactly", async ({ page }) => {
+    const text = "🚀 Café — it isn’t just a tool,\r\n\tit’s a platform. Our cutting‑edge app is trusted by 10,000+ happy users. 👨‍👩‍👧‍👦\r\n";
+    const { analyze } = await import("../src/analysis");
+    await setDuration(page, 0, 4);
+    await toggle(page).click();
+    await setText(page, text);
+    await expect(page.getByTestId("studio")).toBeVisible();
+    const editorValue = await page.getByTestId("editor").inputValue();
+    // The browser keeps \r\n out of a textarea's value: the app types and checks what it holds.
+    const a = analyze(editorValue);
+    expect(await studioText(page)).toBe(editorValue);
+    await expect(page.getByTestId("studio").locator("button.find", { hasText: "cutting‑edge" })).toHaveCount(1);
+    await expect(page.getByTestId("analysis-headline")).toHaveText(`${a.findings.length} findings to review`);
+    await page.getByTestId("btn-start").click();
+    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
+    expect(await output(page)).toBe(editorValue);
+  });
+
+  test("can be turned on or off while typing: what is typed never changes", async ({ page }) => {
+    const { ROBOTIC } = await import("../src/analysis/fixtures");
     await setDuration(page, 0, 6);
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
     await setText(page, ROBOTIC);
     await page.getByTestId("btn-start").click();
     await expect(status(page)).toHaveText("Typing");
-    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toBeDisabled();
-    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
-    expect(await output(page)).toBe(ROBOTIC_HUMANIZED);
-    await expect(page.getByRole("switch", { name: /Smart Humanization/ })).toBeEnabled();
-  });
-});
-
-test.describe("Humanization Studio", () => {
-  const studioText = (page: Page, id: string) => page.getByTestId(id).evaluate((el) => el.textContent ?? "");
-
-  test("inline highlights, three views, navigation and explanations; a per-change revert is typed exactly, with no markup", async ({ page, context }) => {
-    const { ROBOTIC, ROBOTIC_HUMANIZED } = await import("../src/humanize/fixtures");
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await setDuration(page, 0, 4);
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
-    await setText(page, ROBOTIC);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
-    const studio = page.getByTestId("studio");
-    await expect(studio).toBeVisible();
-    await expect(page.getByTestId("studio-summary")).toHaveText("9 changes · 27 words changed · 5 sentences adjusted (27 removed, 8 added)");
-    await expect(studio.locator("button[data-change]")).toHaveCount(9);
-
-    // Real styling: reworded text is underlined, removed text struck through (not color alone).
-    const use = studio.locator("button[data-change]", { hasText: /^use$/ });
-    expect(await use.locator("ins").evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe("underline");
-    await page.getByRole("radio", { name: /Side by side/ }).click();
-    const del = page.getByTestId("studio-original-text").locator("del").first();
-    expect(await del.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe("line-through");
-    await expect(del).toHaveText("In today's fast-paced world, technology");
-
-    // Next/previous, synchronized selection, honest explanation.
-    await page.getByTestId("studio-next").click();
-    await page.getByTestId("studio-next").click();
-    await expect(page.getByTestId("studio-pos")).toHaveText("Change 2 of 9");
-    await expect(page.getByTestId("studio-reason")).toHaveText("Simplified an unnecessarily formal expression.");
-    await expect(studio.locator(".is-selected")).toHaveCount(2);
-    // Keyboard: Alt+↓ inside the Studio (focus is on the Next button).
-    await page.keyboard.press("Alt+ArrowDown");
-    await expect(page.getByTestId("studio-pos")).toHaveText("Change 3 of 9");
-    await page.getByTestId("studio-prev").click();
-
-    // Keep the original wording for one change, then type: exactly the mixed text, nothing else.
-    await page.getByTestId("studio-revert").click();
-    await expect(page.getByTestId("studio-summary")).toContainText("1 kept as original");
-    const mixed = ROBOTIC_HUMANIZED.replace("students use", "students utilize");
-    await page.getByRole("radio", { name: /Final text/ }).click();
-    await page.getByTestId("studio-highlight").click();
-    expect(await studioText(page, "studio-revised-text")).toBe(mixed);
-    await page.getByTestId("studio-highlight").click();
-    await page.getByTestId("btn-start").click();
-    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
-    const typed = await output(page);
-    expect(typed).toBe(mixed);
-    expect(typed).not.toMatch(/[−↺]/);
-    await expect(page.getByTestId("verified-badge")).toBeVisible();
-
-    // Copy both versions.
-    await page.getByTestId("studio-copy-revised").click();
-    await expect(page.getByTestId("studio-note")).toHaveText("Copied the revised text.");
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(mixed);
-    await page.getByTestId("studio-copy-original").click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(ROBOTIC);
-
-    // Changes only.
-    await page.getByTestId("studio-only").click();
-    await expect(page.getByTestId("studio-list").getByRole("listitem")).toHaveCount(9);
-    await expect(page.getByTestId("studio-list").getByRole("listitem").nth(1)).toContainText("kept original");
-    await page.getByTestId("studio-only").click();
-
-    // Re-run on the original clears the kept choice; the next session types the full revision.
-    await page.getByTestId("studio-rerun").click();
-    await expect(page.getByTestId("studio-note")).toHaveText("Checked your original again from scratch.");
-    await expect(page.getByTestId("studio-summary")).not.toContainText("kept as original");
-    await page.getByTestId("btn-start").click();
-    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
-    expect(await output(page)).toBe(ROBOTIC_HUMANIZED);
-
-    // Restore original: the original is typed exactly.
-    await page.getByTestId("humanize-restore").click();
-    await expect(page.getByTestId("studio-banner")).toContainText("Your original will be typed.");
-    await page.getByTestId("btn-start").click();
+    await expect(toggle(page)).toBeEnabled();
+    await toggle(page).click();
+    await expect(page.getByTestId("studio")).toBeVisible();
+    await toggle(page).click();
     await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
     expect(await output(page)).toBe(ROBOTIC);
-    await expect(page.getByTestId("editor")).toHaveValue(ROBOTIC);
   });
 
-  test("SlopMonster's checks: listed and marked in the style checks, its edits explained, the result typed exactly", async ({ page }) => {
-    const { STYLED } = await import("../src/humanize/calibration");
-    const { humanize } = await import("../src/humanize");
-    const want = humanize(STYLED.essay).output;
-    await setDuration(page, 0, 4);
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
-    await setText(page, STYLED.essay);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically");
-    await expect(page.getByTestId("humanize-status")).toContainText("60% (6 of 10 style checks flagged)");
-    await page.getByText("Style checks", { exact: true }).click();
-    const checks = page.getByTestId("humanize-checks");
-    await expect(checks.locator("li")).toHaveCount(13);
-    await expect(checks.locator('li[data-check="buzzwords"]')).toContainText("Overused buzzwordsSlopMonster: flagged");
-    await expect(checks.locator('li[data-check="stock-phrases"]')).toContainText("the 'not just X, but Y' construction");
-    await expect(checks.locator('li[data-check="rule-of-three"]')).toContainText('"curiosity, independence, and confidence"');
-    await expect(checks.locator('li[data-check="numeric-claims"]')).toContainText("nothing to note");
-    // The "leverage" → "use" edit is selected and explained as SlopMonster's.
-    const change = page.getByTestId("studio").locator('button[data-change][aria-label="Reworded: “leverage” to “use”."]');
-    await change.click();
-    await expect(page.getByTestId("studio-reason")).toHaveText("Replaced a buzzword with a plain word (SlopMonster vocabulary list).");
-    await page.getByTestId("btn-start").click();
-    await expect(status(page)).toHaveText("Complete", { timeout: 15_000 });
-    expect(await output(page)).toBe(want);
+  test("checks on this device: no request leaves the page's own origin while checking", async ({ page }) => {
+    const { ROBOTIC } = await import("../src/analysis/fixtures");
+    const origin = new URL(page.url()).origin;
+    const outside: string[] = [];
+    page.on("request", (r) => {
+      if (!r.url().startsWith(origin) && !r.url().startsWith("data:") && !r.url().startsWith("blob:")) outside.push(r.url());
+    });
+    await toggle(page).click();
+    await setText(page, ROBOTIC + "\n\n" + ROBOTIC);
+    await expect(page.getByTestId("studio")).toBeVisible();
+    await page.getByTestId("studio-rerun").click();
+    await expect(page.getByTestId("studio")).toBeVisible();
+    expect(outside).toEqual([]);
   });
 
   test("both themes: highlights use each theme's own colors and stay readable; screenshots", async ({ page }) => {
-    const { ROBOTIC } = await import("../src/humanize/fixtures");
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+    const { ROBOTIC } = await import("../src/analysis/fixtures");
+    await toggle(page).click();
     await setText(page, ROBOTIC);
     await expect(page.getByTestId("studio")).toBeVisible();
-    await page.getByRole("radio", { name: /Side by side/ }).click();
-    await page.getByTestId("studio-next").click();
     await page.getByTestId("studio-next").click();
     const look = () =>
       page.evaluate(() => {
-        const ins = document.querySelector('[data-testid="studio-revised-text"] .chg--add')!;
-        const del = document.querySelector('[data-testid="studio-original-text"] .chg--del')!;
-        const st = (el: Element) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color });
-        return { theme: document.documentElement.dataset.theme, ins: st(ins), del: st(del), line: getComputedStyle(ins.querySelector("ins")!).textDecorationColor };
+        const word = document.querySelector('[data-testid="studio-text"] .find--word')!;
+        const st = getComputedStyle(word);
+        return { theme: document.documentElement.dataset.theme, bg: st.backgroundColor, fg: st.color, line: st.textDecorationColor };
       });
     const first = await look();
-    await page.getByTestId("studio").screenshot({ path: `test-results/studio-${first.theme}.png` });
+    await page.getByTestId("studio").screenshot({ path: `test-results/analysis-${first.theme}.png` });
     await page.getByTestId("theme-switch").click();
     const second = await look();
-    await page.getByTestId("studio").screenshot({ path: `test-results/studio-${second.theme}.png` });
+    await page.getByTestId("studio").screenshot({ path: `test-results/analysis-${second.theme}.png` });
     expect(new Set([first.theme, second.theme])).toEqual(new Set(["light", "dark"]));
-    expect(second.ins.bg).not.toBe(first.ins.bg);
+    expect(second.bg).not.toBe(first.bg);
     expect(second.line).not.toBe(first.line);
-    expect(first.ins.bg).not.toBe(first.del.bg);
-    // Light: blue for added, purple for removed. Dark: orange for added, red for removed.
+    // Light: a blue underline. Dark: an orange one.
     const rgb = (c: string) => c.match(/\d+(\.\d+)?/g)!.map(Number);
     const light = first.theme === "light" ? first : second;
     const dark = first.theme === "dark" ? first : second;
     const [lr, , lb] = rgb(light.line);
-    expect(lb).toBeGreaterThan(lr); // blue
+    expect(lb).toBeGreaterThan(lr);
     const [dr, dg, db] = rgb(dark.line);
     expect(dr).toBeGreaterThan(200);
     expect(dg).toBeGreaterThan(100);
-    expect(db).toBeLessThan(100); // orange
+    expect(db).toBeLessThan(100);
   });
 
-  for (const [width, together] of [
-    [1920, true],
-    [1440, true],
-    [1280, true],
-    [1260, true],
-    [1100, true],
-    [1028, true],
-    [1025, true],
-    [1024, true],
-    [900, true],
-    [700, true],
-    [390, false],
-  ] as const) {
-    test(`layout at ${width}px: side by side ${together ? "shows both texts next to each other" : "stacks them"}, no horizontal overflow`, async ({ browser }) => {
-      const { ROBOTIC } = await import("../src/humanize/fixtures");
+  for (const width of [1920, 1440, 1280, 1260, 1100, 1028, 1025, 1024, 900, 700, 390]) {
+    test(`layout at ${width}px: the panel fits, nothing covers it, no horizontal overflow`, async ({ browser }) => {
+      const { ROBOTIC } = await import("../src/analysis/fixtures");
       const page = await browser.newPage({ viewport: { width, height: 1000 } });
       await page.goto("/");
-      await page.getByRole("switch", { name: /Smart Humanization/ }).click();
+      await page.getByRole("switch", { name: /Check writing style/ }).click();
       await setText(page, ROBOTIC);
-      await page.getByTestId("humanize-review").click();
+      await page.getByTestId("analysis-review").click();
       await expect(page.getByTestId("studio")).toBeFocused();
       await expect(page.getByTestId("studio")).toBeInViewport();
       await page.getByTestId("studio-next").click();
-      await page.getByRole("radio", { name: /Side by side/ }).click();
       const m = await page.evaluate(() => {
         const studio = document.querySelector('[data-testid="studio"]')!.getBoundingClientRect();
-        const cols = [...document.querySelectorAll(".studio__col")].map((c) => c.getBoundingClientRect());
+        const text = document.querySelector('[data-testid="studio-text"]')!.getBoundingClientRect();
         return {
-          sameRow: Math.abs(cols[0].top - cols[1].top) < 2,
-          inside: cols.every((c) => c.left >= studio.left - 0.5 && c.right <= studio.right + 0.5),
-          minCol: Math.min(...cols.map((c) => c.width)),
+          inside: text.left >= studio.left - 0.5 && text.right <= studio.right + 0.5,
+          width: text.width,
           overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          selected: [...document.querySelectorAll('[data-testid="studio"] .is-selected')].map((e) => (e as HTMLElement).dataset.change),
+          selected: [...document.querySelectorAll('[data-testid="studio"] .is-selected')].length,
         };
       });
-      // Nothing (such as the sticky Settings panel) lies on top of the Studio's text columns.
-      const covered = await page.evaluate(() =>
-        [...document.querySelectorAll(".studio__col")].some((c) => {
-          c.scrollIntoView({ block: "center" });
-          const r = c.getBoundingClientRect();
-          const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
-          return [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !c.contains(document.elementFromPoint(x, y)));
-        }),
-      );
-      expect(m.sameRow).toBe(together);
+      const covered = await page.evaluate(() => {
+        const t = document.querySelector('[data-testid="studio-text"]')!;
+        t.scrollIntoView({ block: "center" });
+        const r = t.getBoundingClientRect();
+        const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
+        return [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !t.contains(document.elementFromPoint(x, y)));
+      });
       expect(m.inside).toBe(true);
       expect(m.overflow).toBe(0);
       expect(covered).toBe(false);
-      if (together) expect(m.minCol).toBeGreaterThan(200);
-      // The selected change stays selected in both texts.
-      expect(m.selected).toEqual(["0", "0"]);
+      expect(m.width).toBeGreaterThan(Math.min(300, width - 80));
+      expect(m.selected).toBeGreaterThan(0);
       await page.close();
     });
   }
 
-  test("a long document stays responsive with the Studio open", async ({ page }) => {
-    const { ROBOTIC } = await import("../src/humanize/fixtures");
-    await page.getByRole("switch", { name: /Smart Humanization/ }).click();
-    const long = (ROBOTIC + "\n\n").repeat(160);
-    const t0 = Date.now();
-    await setText(page, long);
-    await expect(page.getByTestId("humanize-headline")).toHaveText("Humanized automatically", { timeout: 10_000 });
-    await expect(page.getByTestId("studio-summary")).toContainText("changes");
-    const shown = Date.now() - t0;
-    expect(shown).toBeLessThan(5000);
-    const t1 = Date.now();
-    for (let i = 0; i < 20; i++) await page.getByTestId("studio-next").click();
-    await expect(page.getByTestId("studio-pos")).toHaveText(/^Change 20 of /);
-    await page.getByRole("radio", { name: /Side by side/ }).click();
-    await page.getByTestId("studio-only").click();
-    await expect(page.getByTestId("studio-list").getByRole("listitem")).toHaveCount(201);
-    expect(Date.now() - t1).toBeLessThan(8000);
-    console.log(`long document: Studio shown ${shown} ms after the text was set; 20 steps + 2 view changes ${Date.now() - t1} ms`);
+  test("long documents stay responsive: an 800-paragraph essay and a 500,000-character paragraph", async ({ page }) => {
+    const { ROBOTIC } = await import("../src/analysis/fixtures");
+    const { analyze } = await import("../src/analysis");
+    await toggle(page).click();
+    const essay = (ROBOTIC + "\n\n").repeat(267).trimEnd(); // 801 paragraphs
+    let paragraph = "";
+    while (paragraph.length < 500_000) paragraph += ROBOTIC.replace(/\n+/g, " ") + " ";
+    for (const [name, text] of [
+      ["800 paragraphs", essay],
+      ["500,000-character paragraph", paragraph],
+    ] as const) {
+      const n = analyze(text).findings.length;
+      const t0 = Date.now();
+      await setText(page, text);
+      // While the check runs (off the main thread), the page keeps answering.
+      const t1 = Date.now();
+      await page.getByTestId("theme-switch").click();
+      const answered = Date.now() - t1;
+      await expect(page.getByTestId("analysis-headline")).toHaveText(`${n.toLocaleString("en-US")} findings to review`, { timeout: 30_000 });
+      await expect(page.getByTestId("studio")).toBeVisible();
+      const shown = Date.now() - t0;
+      const t2 = Date.now();
+      for (let i = 0; i < 20; i++) await page.getByTestId("studio-next").click();
+      await expect(page.getByTestId("studio-pos")).toHaveText(`Finding 20 of ${n.toLocaleString("en-US")}`);
+      await page.getByRole("radio", { name: "Findings" }).click();
+      await expect(page.getByTestId("studio-list").locator("button[data-item]")).toHaveCount(200);
+      await page.getByRole("radio", { name: "Your text" }).click();
+      const stepped = Date.now() - t2;
+      expect(await studioText(page)).toBe(text);
+      console.log(`${name} (${text.length} chars, ${n} findings): theme switch answered in ${answered} ms while checking; panel shown after ${shown} ms; 20 steps + 2 view changes ${stepped} ms`);
+      expect(shown).toBeLessThan(20_000);
+      expect(stepped).toBeLessThan(15_000);
+    }
   });
 });

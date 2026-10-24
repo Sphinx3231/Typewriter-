@@ -18,7 +18,7 @@ function fakeSession(text: string, status: PlaybackStatus = text ? "ready" : "em
     blank: isBlank(text),
     planning: false,
     snapshot: { status },
-    humanize: { enabled: false },
+    analysis: { enabled: false },
     ...over,
   } as unknown as Session;
 }
@@ -112,16 +112,17 @@ describe("Editor", () => {
     expect(document.getElementById("editor-note")!.textContent).toBe("Updating estimate…");
   });
 
-  it("says the original is never changed, and with Smart Humanization on, that a lightly edited copy may be typed", () => {
+  it("says the original is never changed, and with writing analysis on, that it is typed exactly while findings are shown below", () => {
     render(<Editor session={fakeSession("Some words", "ready")} />);
     expect(screen.getByText("This is the original. Typewriter never changes it.")).toBeTruthy();
-    expect(screen.queryByTestId("humanize-status")).toBeNull();
+    expect(screen.queryByTestId("analysis-status")).toBeNull();
     cleanup();
     const text = "Short text.";
-    const humanize = { enabled: true, checking: false, result: { status: "too-short", score: null, edits: [], checks: [] }, usingOriginal: false };
-    render(<Editor session={fakeSession(text, "ready", { humanize } as unknown as Partial<Session>)} />);
-    expect(screen.getByText("This is your original, kept unchanged. Smart Humanization may type a lightly edited copy (see below).")).toBeTruthy();
-    expect(screen.getByTestId("humanize-headline").textContent).toBe("Too short to check");
+    const result = { source: text, findings: [], hits: { vocab: [], phrases: [], punctuation: [], rhythm: [], proof: [] }, counts: { vocab: 0, phrases: 0, punctuation: 0, rhythm: 0, proof: 0 }, ms: 1 };
+    const analysis = { enabled: true, checking: false, result, error: null, score: 5, reviewed: new Set() };
+    render(<Editor session={fakeSession(text, "ready", { analysis } as unknown as Partial<Session>)} />);
+    expect(screen.getByText("This is exactly what will be typed. Writing analysis points things out below; it never changes your text.")).toBeTruthy();
+    expect(screen.getByTestId("analysis-headline").textContent).toBe("Nothing to review");
     expect((screen.getByRole("textbox", { name: "Your text" }) as HTMLTextAreaElement).value).toBe(text);
   });
 });

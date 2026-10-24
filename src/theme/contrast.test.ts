@@ -84,8 +84,8 @@ describe.each([
   });
 });
 
-// Humanization Studio highlights: text inside a highlight, on every surface the Studio sits on,
-// and the underline/strikethrough/box lines as non-text marks.
+// Writing analysis highlights: text inside a highlight, on every surface the panel sits on,
+// and the underline and box lines as non-text marks.
 describe.each([
   ["light", light],
   ["dark", dark],

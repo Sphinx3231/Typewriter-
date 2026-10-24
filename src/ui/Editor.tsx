@@ -3,7 +3,7 @@ import type { Session } from "../state/useSession";
 import { LARGE_TEXT_CHARS } from "../state/useSession";
 import { ConfirmButton, Button } from "./controls";
 import { nf } from "./format";
-import { HumanizeStatus } from "./HumanizeStatus";
+import { AnalysisStatus } from "./AnalysisStatus";
 
 const SAMPLE = `The quick brown fox jumps over the lazy dog. It's a sentence that uses every letter of the alphabet, which is why typists have practiced with it for more than a century.
 
@@ -22,8 +22,8 @@ export function Editor({ session }: { session: Session }) {
             <label htmlFor="source-text">Your text</label>
           </h2>
           <p className="panel__sub">
-            {session.humanize.enabled
-              ? "This is your original, kept unchanged. Smart Humanization may type a lightly edited copy (see below)."
+            {session.analysis.enabled
+              ? "This is exactly what will be typed. Writing analysis points things out below; it never changes your text."
               : "This is the original. Typewriter never changes it."}
           </p>
         </div>
@@ -91,7 +91,7 @@ export function Editor({ session }: { session: Session }) {
           </p>
         )}
       </footer>
-      <HumanizeStatus session={session} />
+      <AnalysisStatus session={session} />
     </section>
   );
 }

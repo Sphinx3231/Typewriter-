@@ -56,30 +56,22 @@ export function SettingsPanel({ session }: { session: Session }) {
 
       <OutputSettings session={session} />
 
-      {/* ---- Smart Humanization (SPEC §2a) ---- */}
-      <div className="settings__group" data-testid="humanize-settings">
-        <h3 className="settings__heading">Smart Humanization</h3>
+      {/* ---- Writing analysis (SPEC §2a) ---- */}
+      <div className="settings__group" data-testid="analysis-settings">
+        <h3 className="settings__heading">Writing analysis</h3>
         <Switch
-          checked={session.humanize.enabled}
-          onChange={session.humanize.setEnabled}
-          disabled={running}
-          label="Smart Humanization"
-          description="Checks your text against a writing-style checklist as you type or paste. At 50% or more, it types a copy with small wording edits, without asking. Your original is kept and can be typed instead. A style heuristic, not an AI detector. Runs on this device."
+          checked={session.analysis.enabled}
+          onChange={session.analysis.setEnabled}
+          label="Check writing style"
+          description="Checks your text with SlopMonster, an open-source style checker, and shows what it finds: stock vocabulary and phrases, punctuation habits, three-item lists and number claims. It never changes your text. Runs on this device; nothing is sent anywhere."
         />
-        {session.humanize.enabled ? (
-          <Field label="Tone to aim for" hint="Used by the tone check. With Formal, formal wording is kept.">
-            <Segmented
-              label="Tone to aim for"
-              size="sm"
-              value={session.humanize.tone}
-              onChange={session.humanize.setTone}
-              options={[
-                { value: "any", label: "Any" },
-                { value: "casual", label: "Casual" },
-                { value: "formal", label: "Formal" },
-              ]}
-            />
-          </Field>
+        {session.analysis.enabled ? (
+          <Switch
+            checked={session.analysis.allowProof}
+            onChange={session.analysis.setAllowProof}
+            label="My number claims are backed up"
+            description="SlopMonster's --allow-proof: numbers next to words like “customers” are still shown, but don't lower the score. The checker can't verify them."
+          />
         ) : null}
       </div>
 

@@ -20,8 +20,8 @@ import { tauriBridge, type Bridge, type Support } from "../desktop/bridge";
 import { currentHost } from "../platform";
 import { ExternalController } from "../desktop/external";
 import type { VerifyResult } from "../desktop/verify";
-import { humanize, type HumanizeResult, type Tone } from "../humanize";
-import { applyReverts, diffText, type TextDiff } from "../humanize/diff";
+import { score as slopScore, type Analysis } from "../analysis";
+import { createAnalyzer, type Analyzer } from "../analysis/service";
 import { readJSON, readString, removeKey, writeJSON, writeString } from "./storage";
 
 export type Destination = "preview" | "external";
@@ -38,10 +38,10 @@ export interface Preferences {
   countdownSec: number;
   /** Minimise Typewriter when external typing is armed, so the previous app comes forward. */
   minimizeWhileTyping: boolean;
-  /** Smart Humanization (SPEC §2a): check the writing style and, at 50% or more, type a lightly edited copy. Off by default. */
-  smartHumanize: boolean;
-  /** The tone the style checklist compares against. */
-  humanizeTone: Tone;
+  /** Writing analysis (SPEC §2a): check the text with SlopMonster's checker and show its findings. Never changes the text. Off by default. */
+  writingAnalysis: boolean;
+  /** SlopMonster's --allow-proof: number claims are still reported but don't lower the score. */
+  allowProof: boolean;
 }
 
 export const DEFAULT_PREFS: Preferences = {
@@ -51,8 +51,8 @@ export const DEFAULT_PREFS: Preferences = {
   destination: "preview",
   countdownSec: 5,
   minimizeWhileTyping: true,
-  smartHumanize: false,
-  humanizeTone: "any",
+  writingAnalysis: false,
+  allowProof: false,
 };
 
 export interface HistoryEntry {
@@ -85,10 +85,12 @@ function settingsKey(s: PlaybackSettings) {
 
 export function useSession() {
   const [prefs, setPrefsState] = useState<Preferences>(() => {
-    const p = { ...DEFAULT_PREFS, ...readJSON<Partial<Preferences>>("prefs", {}) };
-    // Saved by an older version, or edited by hand: never let a bad value turn rewriting on.
-    if (typeof p.smartHumanize !== "boolean") p.smartHumanize = false;
-    if (!["any", "casual", "formal"].includes(p.humanizeTone)) p.humanizeTone = "any";
+    const saved = readJSON<Partial<Preferences> & { smartHumanize?: unknown; humanizeTone?: unknown }>("prefs", {});
+    const { smartHumanize, humanizeTone: _tone, ...rest } = saved && typeof saved === "object" ? saved : {};
+    const p = { ...DEFAULT_PREFS, ...rest };
+    // Versions up to 1.2.0 called it Smart Humanization (and rewrote text); a choice to turn it on carries over.
+    if (typeof rest.writingAnalysis !== "boolean") p.writingAnalysis = smartHumanize === true;
+    if (typeof rest.allowProof !== "boolean") p.allowProof = false;
     return p;
   });
   const [settings, setSettingsState] = useState<PlaybackSettings>(() => normalizeSettings(readJSON("settings", null)));
@@ -169,32 +171,41 @@ export function useSession() {
   const realism = realismKey(settings);
   const graphemesStats = useMemo(() => computeStats(deferredText), [deferredText]);
 
-  // ---- Smart Humanization (SPEC §2a) ----
-  // `text` is the immutable original: the editor never shows a rewrite. When the feature is on,
-  // the text to type is derived from the original every time, never from a previous rewrite.
-  const humanizeOn = prefs.smartHumanize;
-  const tone = prefs.humanizeTone;
-  /** Bumped by "Re-run": checks the original again from scratch. */
+  // ---- Writing analysis (SPEC §2a) ----
+  // SlopMonster's checker reports findings and never changes the text: what is typed is always
+  // exactly the editor text. The check runs off the main thread; a newer text interrupts it.
+  const analysisOn = prefs.writingAnalysis;
+  const analyzerRef = useRef<Analyzer | null>(null);
+  /** Bumped by "Check again". */
   const [runs, setRuns] = useState(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const humanized = useMemo<HumanizeResult | null>(() => (humanizeOn ? humanize(deferredText, tone) : null), [humanizeOn, deferredText, tone, runs]);
-  /** What changed, for the Studio (presentation only; never typed). */
-  const diff = useMemo<TextDiff | null>(() => (humanized?.status === "humanized" ? diffText(humanized.source, humanized.output) : null), [humanized]);
-  /** The original the user chose to type as written while the feature is on (until the text changes). */
-  const [originalFor, setOriginalFor] = useState<string | null>(null);
-  /** Changes the user put back to the original wording, for this exact result. */
-  const [reverted, setReverted] = useState<{ result: HumanizeResult; ids: number[] } | null>(null);
-  const revertedIds = useMemo(() => new Set(reverted && reverted.result === humanized ? reverted.ids : []), [reverted, humanized]);
-  const prepare = useCallback(
-    (src: string): string => {
-      if (!humanizeOn || originalFor === src) return src;
-      if (humanized && humanized.source === src) return diff ? applyReverts(diff, revertedIds) : humanized.output;
-      return humanize(src, tone).output;
-    },
-    [humanizeOn, originalFor, humanized, diff, revertedIds, tone],
-  );
-  /** What a session started now would type. */
-  const prepared = prepare(deferredText);
+  /** The text "Check again" was last pressed for. */
+  const [rerunFor, setRerunFor] = useState<string | null>(null);
+  const [checked, setChecked] = useState<{ text: string; runs: number; result: Analysis | null; error: string | null } | null>(null);
+  /** Findings the user marked as reviewed, for this exact result. */
+  const [reviewed, setReviewed] = useState<{ result: Analysis; ids: number[] } | null>(null);
+  useEffect(() => () => analyzerRef.current?.dispose(), []);
+  useEffect(() => {
+    if (!analysisOn || isBlank(deferredText)) {
+      analyzerRef.current?.cancel();
+      setChecked(null);
+      return;
+    }
+    analyzerRef.current ??= createAnalyzer();
+    let live = true;
+    setChecked({ text: deferredText, runs, result: null, error: null });
+    analyzerRef.current.run(deferredText).then(
+      (result) => live && setChecked({ text: deferredText, runs, result, error: null }),
+      (e: unknown) => live && setChecked({ text: deferredText, runs, result: null, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [analysisOn, deferredText, runs]);
+  const current = checked && checked.text === deferredText && checked.runs === runs ? checked : null;
+  const analysisResult = analysisOn ? current?.result ?? null : null;
+  const reviewedIds = useMemo(() => new Set(reviewed && reviewed.result === analysisResult ? reviewed.ids : []), [reviewed, analysisResult]);
+  /** What a session started now types: the text itself (deferred while editing a long text). */
+  const prepared = deferredText;
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const script = useMemo(() => buildScript(prepared, settings), [prepared, realism]);
@@ -281,21 +292,12 @@ export function useSession() {
       const st = controller.getStatus();
       if (st === "playing" || st === "paused") return; // the editor is locked during playback
       setTextState(t);
-      // Any edit is checked afresh: a choice to type the original, or to revert a change, applies to the text it was made for.
-      setOriginalFor(null);
-      setReverted(null);
     },
     [controller],
   );
 
   const updateSettings = useCallback((patch: Partial<PlaybackSettings>) => setSettingsState((s) => ({ ...s, ...patch })), []);
   const updatePrefs = useCallback((patch: Partial<Preferences>) => setPrefsState((p) => ({ ...p, ...patch })), []);
-  /** Changes to Smart Humanization wait until no session is running: text never changes mid-session. */
-  const idle = useCallback(() => {
-    const st = controller.getStatus();
-    return st !== "playing" && st !== "paused";
-  }, [controller]);
-
   /** Build a fresh timeline from the current text and settings, then play it from the start. */
   const start = useCallback((): boolean => {
     if (isBlank(text) || validateSettings(settings).length) return false;
@@ -303,8 +305,8 @@ export function useSession() {
     sound.setEnabled(settings.sound);
     const st = controller.getStatus();
     if (st === "playing" || st === "paused") controller.stop();
-    // The checklist and any rewrite finish here, synchronously, before anything is typed.
-    const out = prepare(text);
+    // Exactly the editor text: writing analysis never changes it.
+    const out = text;
     const sc = out === prepared && realismKey(settings) === realism ? script : buildScript(out, settings);
     const tl = buildTimeline(sc, settings);
     if (controller instanceof ExternalController)
@@ -313,7 +315,7 @@ export function useSession() {
     loaded.current = { text: out, key: settingsKey(settings) };
     sessionStart.current = { at: new Date().toISOString(), mistakes: sc.mistakes };
     return controller.start();
-  }, [text, prepare, prepared, settings, realism, script, controller, sound, prefs.countdownSec, prefs.minimizeWhileTyping]);
+  }, [text, prepared, settings, realism, script, controller, sound, prefs.countdownSec, prefs.minimizeWhileTyping]);
 
   const pause = useCallback(() => controller.pause(), [controller]);
   const resume = useCallback(() => {
@@ -355,52 +357,48 @@ export function useSession() {
     [updateSettings],
   );
 
-  const running = snapshot.status === "playing" || snapshot.status === "paused";
-  const humanizeState = {
-    enabled: humanizeOn,
-    tone,
-    /** The checklist hasn't caught up with the latest edit yet. */
-    checking: humanizeOn && planning,
-    /** The checklist result for the current original (null when off). */
-    result: humanized,
-    /** The user chose to type the original as written. */
-    usingOriginal: humanizeOn && originalFor === deferredText,
-    /** Exactly what a session started now types. */
-    prepared,
-    locked: running,
-    setEnabled: (on: boolean) => idle() && updatePrefs({ smartHumanize: on }),
-    setTone: (t: Tone) => idle() && updatePrefs({ humanizeTone: t }),
-    typeOriginal: () => idle() && setOriginalFor(deferredText),
-    typeHumanized: () => idle() && setOriginalFor(null),
-    /** Exactly what changed between the original and the humanized copy (null unless humanized). */
-    diff,
-    /** Changes put back to the original wording; the prepared copy already reflects them. */
-    reverted: revertedIds,
-    /** Put one change back to the original wording (or undo that). Never while a session runs. */
-    setChangeReverted: (id: number, revert: boolean) => {
-      if (!idle() || !humanized || !diff || !diff.changes.some((c) => c.id === id)) return false;
-      const ids = new Set(revertedIds);
-      if (revert) ids.add(id);
+  const analysisState = {
+    enabled: analysisOn,
+    allowProof: prefs.allowProof,
+    /** The check hasn't caught up with the latest edit yet. */
+    checking: analysisOn && !isBlank(text) && (planning || !current || (!current.result && !current.error)),
+    /** SlopMonster's findings for the current text (null when off, checking or failed). */
+    result: analysisResult,
+    /** Why the last check failed (the text is unaffected). */
+    error: analysisOn ? current?.error ?? null : null,
+    /** SlopMonster's score out of 5. */
+    score: analysisResult ? slopScore(analysisResult, prefs.allowProof) : null,
+    reviewed: reviewedIds,
+    /** Mark a finding as reviewed (or not). Only for the current result. */
+    setReviewed: (id: number, on: boolean) => {
+      if (!analysisResult || !analysisResult.findings.some((f) => f.id === id)) return false;
+      const ids = new Set(reviewedIds);
+      if (on) ids.add(id);
       else ids.delete(id);
-      setReverted({ result: humanized, ids: [...ids].sort((a, b) => a - b) });
+      setReviewed({ result: analysisResult, ids: [...ids].sort((x, y) => x - y) });
       return true;
     },
-    /** Check the original again from scratch: clears reverts and the "type my original" choice. Never runs on a previous rewrite. */
+    setEnabled: (on: boolean) => updatePrefs({ writingAnalysis: on }),
+    setAllowProof: (on: boolean) => updatePrefs({ allowProof: on }),
+    /** Check the text again from scratch (clears reviewed marks). */
     rerun: () => {
-      if (!idle()) return false;
-      setOriginalFor(null);
-      setReverted(null);
+      if (!analysisOn) return false;
+      setReviewed(null);
+      setRerunFor(deferredText);
       setRuns((n) => n + 1);
       return true;
     },
-    /** How many times "Re-run" was used (for a short confirmation in the UI). */
     runs,
+    /** The current result comes from "Check again" on this same text. */
+    rechecked: !!analysisResult && runs > 0 && rerunFor === deferredText,
   };
 
   return {
     text,
     setText,
-    humanize: humanizeState,
+    analysis: analysisState,
+    /** Exactly what a session started now types: the editor text. */
+    prepared,
     stats: graphemesStats,
     planning,
     blank,

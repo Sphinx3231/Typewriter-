@@ -20,9 +20,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
-/** The Smart Humanization sample texts, read from the unit-test fixtures so both suites check the same strings (LF line endings, as in the repository; a Windows checkout may have CRLF). */
+/** The writing-analysis sample texts, read from the unit-test fixtures so both suites check the same strings (LF line endings, as in the repository; a Windows checkout may have CRLF). */
 const FIXTURES = Object.fromEntries(
-  [...readFileSync(join(here, "..", "src", "humanize", "fixtures.ts"), "utf8").replace(/\r\n/g, "\n").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
+  [...readFileSync(join(here, "..", "src", "analysis", "fixtures.ts"), "utf8").replace(/\r\n/g, "\n").matchAll(/export const (\w+) = `([^`]*)`;/g)].map((m) => [m[1], m[2]]),
 );
 const APP = resolve(process.argv[2] ?? join(here, "../src-tauri/target/release/typewriter"));
 const DISPLAY = ":99";
@@ -173,15 +173,15 @@ function boundKeysyms(chars) {
 const editorText = () => ui(`document.getElementById("source-text").value`);
 
 /**
- * The app's own humanizer and diff, bundled from the source, so the harness knows exactly what the
- * packaged app must produce for a large document. (Only the expected text comes from here; every
- * observed text comes from the packaged app.)
+ * The app's own SlopMonster checker, bundled from the source, so the harness knows exactly what the
+ * packaged app must find. (Only the expected findings come from here; every observed text and
+ * highlight comes from the packaged app.)
  */
 async function engine() {
   const { build } = await import("rolldown");
   const dir = mkdtempSync(join(tmpdir(), "tw-engine-"));
-  const src = (f) => JSON.stringify(join(here, "..", "src", "humanize", f));
-  writeFileSync(join(dir, "entry.ts"), `export { humanize } from ${src("index.ts")};\nexport { diffText, applyReverts } from ${src("diff.ts")};\nexport { STYLED } from ${src("calibration.ts")};\n`);
+  const src = (f) => JSON.stringify(join(here, "..", "src", "analysis", f));
+  writeFileSync(join(dir, "entry.ts"), `export { analyze, explain } from ${src("index.ts")};\nexport { STYLED } from ${src("corpus.ts")};\n`);
   await build({ input: join(dir, "entry.ts"), output: { file: join(dir, "engine.mjs"), format: "esm" }, logLevel: "silent" });
   return import(pathToFileURL(join(dir, "engine.mjs")).href);
 }
@@ -466,228 +466,188 @@ async function main() {
     shot("desktop-verified");
   });
 
-  await check("Smart Humanization on: the humanized copy is typed exactly (typos on); with one change kept as original, exactly that mix; off: the exact original", async () => {
-    const { ROBOTIC, ROBOTIC_HUMANIZED } = FIXTURES;
-    assert(ROBOTIC && ROBOTIC_HUMANIZED, "fixtures not found");
-    const run = async () => {
-      await resetDoc();
-      await ui(`(__tw.click("btn-start"), 1)`);
-      // The previous session's "Sent" must give way to this one before its end is awaited.
-      await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
-      await sleep(300);
-      await focusDoc();
-      await until(async () => (await state()).status === "Sent", 40000, "completion");
-      return docValue();
-    };
-    await prepare(ROBOTIC, { seconds: 12, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
-    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
-    await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
+  /** The writing-analysis panel as the packaged app shows it. */
+  const panel = () =>
+    ui(`(() => { const q = (t) => document.querySelector('[data-testid="' + t + '"]');
+      return { headline: q("analysis-headline")?.textContent, status: q("analysis-status")?.textContent, summary: q("studio-summary")?.textContent,
+        pos: q("studio-pos")?.textContent, note: q("studio-note")?.textContent, text: q("studio-text")?.textContent }; })()`);
+  /** Each finding's highlighted words, read from the marks in the packaged app's panel. */
+  const marked = async () =>
+    JSON.parse(
+      await ui(`JSON.stringify((() => { const own = {};
+        for (const m of document.querySelectorAll('[data-testid="studio-text"] button.find'))
+          for (const id of m.dataset.f.split(" ")) own[id] = (own[id] ?? "") + m.textContent;
+        return own; })())`),
+    );
+  const findingsHeadline = (n) => `${n.toLocaleString("en-US")} ${n === 1 ? "finding" : "findings"} to review`;
+  const typeIt = async (limit = 40000) => {
+    await resetDoc();
+    await ui(`(__tw.click("btn-start"), 1)`);
+    // The previous session's "Sent" must give way to this one before its end is awaited.
+    await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
+    await sleep(300);
+    await focusDoc();
+    await until(async () => (await state()).status === "Sent", limit, "completion");
+    return docValue();
+  };
 
-    // The Studio's side-by-side view in this webview: both texts next to each other (stacked only
-    // below 640 px), inside the panel, and no horizontal scrolling.
-    const view = (name) => ui(`([...document.querySelectorAll('[data-testid="studio"] [role="radio"]')].find((x) => x.textContent.trim() === "${name}").click(), 1)`);
-    await view("Side by side");
-    await sleep(400);
+  await check("Writing analysis on: SlopMonster's real findings are highlighted and explained in the packaged app, and the text is typed exactly as written (typos on); off: exactly the same", async () => {
+    const { analyze, explain } = await engine();
+    const { ROBOTIC } = FIXTURES;
+    assert(ROBOTIC, "fixtures not found");
+    const a = analyze(ROBOTIC);
+    assert(a.findings.length > 3, "the sample has too few findings");
+    await prepare(ROBOTIC, { seconds: 12, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.switchByLabel("Check writing style", true), 1)`);
+    await until(async () => (await panel()).headline === findingsHeadline(a.findings.length), 10000, "the writing analysis");
+    let p = await panel();
+    assert(p.status.includes("Your text is typed exactly as written."), `status line: ${p.status}`);
+    assert(p.text === ROBOTIC, "the panel's text is not the editor text");
+    const own = await marked();
+    for (const f of a.findings) {
+      const want = f.ranges.map(([s, e]) => ROBOTIC.slice(s, e)).join("");
+      assert(own[f.id] === want, `finding ${f.id} (${f.rule}) highlights ${JSON.stringify(own[f.id])}, expected ${JSON.stringify(want)}`);
+    }
+    console.log(`    ${a.findings.length} findings highlighted exactly where SlopMonster's checker puts them (${Object.entries(a.counts).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(", ")})`);
+
+    // The panel fits the webview: inside the window, nothing on top of the text, no horizontal scrolling.
     const measure = async () => {
       const lay = JSON.parse(
         await ui(`JSON.stringify((() => {
           const studio = document.querySelector('[data-testid="studio"]');
+          const t = document.querySelector('[data-testid="studio-text"]');
+          t.scrollIntoView({ block: "center" });
           const s = studio.getBoundingClientRect();
-          const els = [...document.querySelectorAll(".studio__col")];
-          const cols = els.map((c) => c.getBoundingClientRect());
-          // Nothing (such as the sticky Settings panel) may lie on top of the text columns.
-          const covered = els.some((c) => {
-            c.scrollIntoView({ block: "center" });
-            const r = c.getBoundingClientRect();
-            const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
-            return [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !c.contains(document.elementFromPoint(x, y)));
-          });
-          return {
-            width: innerWidth,
-            widths: cols.map((c) => Math.round(c.width)),
-            sameRow: cols.length === 2 && Math.abs(cols[0].top - cols[1].top) < 2,
-            inside: cols.every((c) => c.left >= s.left - 0.5 && c.right <= s.right + 0.5),
-            overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-            covered,
-          };
+          const r = t.getBoundingClientRect();
+          const y = Math.max(r.top, 0) + Math.min(r.height, innerHeight) / 2;
+          const covered = [r.left + 10, r.left + r.width / 2, r.right - 10].some((x) => !t.contains(document.elementFromPoint(x, y)));
+          return { width: innerWidth, panel: Math.round(s.width), inside: s.left >= -0.5 && s.right <= innerWidth + 0.5 && r.left >= s.left - 0.5 && r.right <= s.right + 0.5,
+            overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, covered };
         })())`),
       );
-      console.log(`    side by side in a ${lay.width}px window: ${lay.sameRow ? "next to each other" : "stacked"}, columns ${lay.widths.join(" + ")} px, overflow ${lay.overflow} px${lay.covered ? ", COVERED" : ""}`);
-      assert(lay.widths.length === 2 && lay.sameRow === lay.width > 640, `side by side layout wrong: ${JSON.stringify(lay)}`);
-      assert(lay.inside && lay.overflow <= 0, `the Studio overflows: ${JSON.stringify(lay)}`);
-      assert(!lay.covered, `something covers the Studio: ${JSON.stringify(lay)}`);
-      if (lay.sameRow) assert(Math.min(...lay.widths) > 200, `columns too narrow: ${JSON.stringify(lay)}`);
+      console.log(`    panel in a ${lay.width}px window: ${lay.panel} px wide, overflow ${lay.overflow} px${lay.covered ? ", COVERED" : ""}`);
+      assert(lay.inside && lay.overflow <= 0, `the panel overflows: ${JSON.stringify(lay)}`);
+      assert(!lay.covered, `something covers the panel: ${JSON.stringify(lay)}`);
+      assert(lay.panel > 300, `the panel is too narrow: ${JSON.stringify(lay)}`);
     };
     await measure();
-    // A smaller window (a laptop with display scaling): the Studio moves below Settings, full width.
+    // A smaller window (a laptop with display scaling): the panel moves below Settings, full width.
     const win = await mainWindow();
     xdo("windowsize", "--sync", win, "1050", "860");
     await sleep(800);
     await measure();
     xdo("windowsize", "--sync", win, "1360", "900");
     await sleep(800);
+
+    // A click on "leverage" explains it with SlopMonster's guidance; it can be marked reviewed.
+    const lev = a.findings.find((f) => f.excerpt === "leverage");
+    assert(lev, "no 'leverage' finding");
+    await ui(`([...document.querySelectorAll('[data-testid="studio-text"] button.find')].find((m) => m.textContent === "leverage").click(), 1)`);
+    await sleep(200);
+    p = await panel();
+    assert(p.pos === `Finding ${lev.id + 1} of ${a.findings.length}`, `position: ${p.pos}`);
+    const reason = await ui(`document.querySelector('[data-testid="studio-reason"]').textContent`);
+    assert(reason === explain(lev), `reason: ${reason}`);
+    await ui(`(__tw.click("studio-review"), 1)`);
+    await sleep(200);
+    assert((await panel()).summary.includes("; 1 reviewed"), "the reviewed mark is not counted");
     await ui(`(document.querySelector('[data-testid="studio"]').scrollIntoView({ block: "start" }), 1)`);
     await sleep(300);
-    shot("desktop-studio-side-by-side");
-    await view("Final text");
-    await sleep(200);
-    let got = await run();
-    assert(got === ROBOTIC_HUMANIZED, `humanized copy differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(ROBOTIC_HUMANIZED)}`);
-    const kept = await ui(`document.getElementById("source-text").value`);
-    assert(kept === ROBOTIC, "the original in the editor changed");
+    shot("desktop-writing-analysis");
 
-    // Humanization Studio: keep the original wording for one change (2nd: "utilize" → "use"); exactly that mix is typed.
-    await ensureIdle();
-    await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), 1)`);
-    await sleep(200);
-    await ui(`(__tw.click("studio-revert"), 1)`);
-    await sleep(300);
-    const mixed = ROBOTIC_HUMANIZED.replace("students use", "students utilize");
-    got = await run();
-    assert(got === mixed, `text with one change kept as original differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(mixed)}`);
-    assert(!/[−↺]/.test(got), "highlight markup reached the document");
+    let got = await typeIt();
+    assert(got === ROBOTIC, `typed text differs from the text:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(ROBOTIC)}`);
+    assert((await editorText()) === ROBOTIC, "the text in the editor changed");
 
     await ensureIdle();
-    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await ui(`(__tw.switchByLabel("Check writing style", false), 1)`);
     await sleep(300);
-    got = await run();
-    assert(got === ROBOTIC, `original differs:\n${JSON.stringify(got)}`);
+    // Over WebDriver a missing element's text arrives as null.
+    const off = await panel();
+    assert(off.headline == null && off.summary == null, `the analysis is still shown while off: ${JSON.stringify(off)}`);
+    got = await typeIt();
+    assert(got === ROBOTIC, `with analysis off, typed text differs:\n${JSON.stringify(got)}`);
   });
 
-  await check("SlopMonster's checks in the packaged app: listed and marked, its edit explained and restorable; the prepared text is typed exactly", async () => {
-    const { humanize, diffText, applyReverts, STYLED } = await engine();
-    const src = STYLED.essay;
-    const r = humanize(src);
-    const d = diffText(src, r.output);
-    await prepare(src, { seconds: 14, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
-    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
-    await until(async () => (await ui(`document.querySelector('[data-testid="humanize-headline"]')?.textContent`)) === "Humanized automatically", 5000, "automatic humanization");
-    const line = await ui(`document.querySelector('[data-testid="humanize-status"]').textContent`);
-    assert(line.includes(`${r.score}% (${r.flagged} of ${r.applicable} style checks flagged)`), `status line: ${line}`);
-    const checks = JSON.parse(
-      await ui(`JSON.stringify([...document.querySelectorAll('[data-testid="humanize-checks"] li')].map((li) => [li.dataset.check, li.className, li.querySelector(".humanize__src")?.textContent ?? ""]))`),
-    );
-    const want = r.checks.map((c) => [c.id, !c.applicable ? "is-na" : c.flagged ? (c.advisory ? "is-note" : "is-flagged") : "", c.source === "slopmonster" ? "SlopMonster" : ""]);
-    assert(JSON.stringify(checks) === JSON.stringify(want), `checklist:\n${JSON.stringify(checks)}\nexpected\n${JSON.stringify(want)}`);
-    console.log(`    ${r.score}% (${r.flagged} of ${r.applicable}); SlopMonster flagged: ${r.checks.filter((c) => c.source && c.flagged).map((c) => c.id).join(", ")}`);
-    // The "leverage" → "use" edit: selected, explained as SlopMonster's, kept as original.
-    const to = d.changes.find((c) => c.before === "leverage" && c.after === "use");
-    assert(to, "no 'leverage' change in the diff");
-    await ui(`(document.querySelector('[data-testid="studio"] button[data-change="${to.id}"]').click(), 1)`);
+  await check("Writing analysis of an essay with curly quotes and accents: every category SlopMonster reports is shown, a nested finding picks the inner one, and the text is typed exactly", async () => {
+    const { analyze } = await engine();
+    // Characters every X keymap in this harness can type (see boundKeysyms): no emoji.
+    const src = `${(await engine()).STYLED.essay}\n\nIt isn’t just a café, it’s a seamless journey. Unlock the power of crème brûlée.`;
+    const a = analyze(src);
+    const cats = Object.entries(a.counts).filter(([, n]) => n).map(([k]) => k);
+    await prepare(src, { seconds: 16, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
+    await ui(`(__tw.switchByLabel("Check writing style", true), 1)`);
+    await until(async () => (await panel()).headline === findingsHeadline(a.findings.length), 10000, "the writing analysis");
+    const p = await panel();
+    assert(p.summary.startsWith(`${a.findings.length} findings in ${cats.length} categories`), `summary: ${p.summary}`);
+    const own = await marked();
+    for (const f of a.findings) assert(own[f.id] === f.ranges.map(([s, e]) => src.slice(s, e)).join(""), `finding ${f.id} (${f.rule}) highlighted as ${JSON.stringify(own[f.id])}`);
+    // "Unlock" is inside "Unlock the power": a click picks the inner finding.
+    await ui(`([...document.querySelectorAll('[data-testid="studio-text"] button.find.is-nested')].find((m) => m.textContent === "Unlock").click(), 1)`);
     await sleep(200);
-    const reason = await ui(`document.querySelector('[data-testid="studio-reason"]').textContent`);
-    assert(reason === "Replaced a buzzword with a plain word (SlopMonster vocabulary list).", `reason: ${reason}`);
-    await ui(`(__tw.click("studio-revert"), 1)`);
-    await sleep(300);
-    const mixed = applyReverts(d, new Set([to.id]));
-    assert(mixed.includes("Teachers can leverage these tools") && mixed !== r.output, "the expected mix is wrong");
-    await resetDoc();
-    await ui(`(__tw.click("btn-start"), 1)`);
-    await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
-    await sleep(300);
-    await focusDoc();
-    await until(async () => (await state()).status === "Sent", 45000, "completion");
-    const got = await docValue();
-    assert(got === mixed, `typed text differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(mixed)}`);
-    assert((await ui(`document.getElementById("source-text").value`)) === src, "the original in the editor changed");
+    const rule = await ui(`document.querySelector('[data-testid="studio-explain"]').textContent`);
+    assert(rule.includes("SlopMonster rule: “unlock”"), `explanation: ${rule}`);
+    console.log(`    ${a.findings.length} findings in ${cats.join(", ")}`);
+    const got = await typeIt(50000);
+    assert(got === src, `typed text differs:\n${JSON.stringify(got)}\nexpected\n${JSON.stringify(src)}`);
     await ensureIdle();
-    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await ui(`(__tw.switchByLabel("Check writing style", false), 1)`);
     await sleep(300);
   });
 
-  await check("large documents: a 500,000-character paragraph and an 800-paragraph essay are humanized, highlighted and restorable; the prepared text is exact; a long humanized document is typed exactly", async () => {
-    const { humanize, diffText, applyReverts } = await engine();
+  await check("large documents: a 500,000-character paragraph and an 800-paragraph essay are checked without freezing the app, their findings navigable; a long checked document is typed exactly", async () => {
+    const { analyze } = await engine();
     const { ROBOTIC } = FIXTURES;
-    const studio = () =>
-      ui(`(() => { const q = (t) => document.querySelector('[data-testid="' + t + '"]');
-        return { headline: q("humanize-headline")?.textContent, summary: q("studio-summary")?.textContent, pos: q("studio-pos")?.textContent, note: q("studio-note")?.textContent }; })()`);
-    const copyRevised = async () => {
-      // xclip stays behind to serve the selection: it must not hold on to our output pipes.
-      execFileSync("xclip", ["-i", "-selection", "clipboard"], { env, input: "(empty)", stdio: ["pipe", "ignore", "ignore"] });
-      await pressMain("studio-copy-revised");
-      await until(async () => /Copied the revised text/.test((await studio()).note ?? ""), 20000, "Copy revised").catch(async (e) => {
-        const where = await ui(`({ focused: document.activeElement && (document.activeElement.dataset.testid || document.activeElement.tagName), pageHasFocus: document.hasFocus() })`);
-        let active = "?";
-        try { active = xdo("getwindowname", xdo("getactivewindow")); } catch {}
-        throw new Error(`${e.message}; the Studio says ${JSON.stringify((await studio()).note)}; focus ${JSON.stringify(where)}; active X window ${JSON.stringify(active)}`);
-      });
-      return clipboard();
-    };
     const fmt = (n) => n.toLocaleString("en-US");
     for (const [name, text] of [
-      ["single paragraph", "Moreover, we utilize it in order to learn. ".repeat(11_628)],
+      ["single paragraph", "We leverage it in order to learn, and then we move on to the next part of the day. ".repeat(6_000)],
       ["800 paragraphs", (ROBOTIC + "\n\n").repeat(800)],
     ]) {
-      const want = humanize(text);
-      assert(want.status === "humanized", `${name}: the engine did not humanize it`);
-      const d = diffText(want.source, want.output);
+      const a = analyze(text);
+      assert(a.findings.length > 1000, `${name}: the sample has only ${a.findings.length} findings`);
       await prepare("", { seconds: 30, mistakes: "Off", countdown: 2 });
-      await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
+      await ui(`(__tw.switchByLabel("Check writing style", true), 1)`);
       const t0 = Date.now();
       await ui(`(__tw.setText(${JSON.stringify(text)}), 1)`);
-      // Smart Humanization runs on its own; the Studio shows every change.
-      const want0 = `${d.changes.length === 1 ? "1 change" : fmt(d.changes.length) + " changes"}`;
-      await until(async () => (await studio()).summary?.startsWith(want0), 60000, `the Studio to show ${want0}`);
+      // While the checker runs (off the page's thread), the app keeps answering.
+      const r1 = Date.now();
+      await ui(`1`);
+      const during = Date.now() - r1;
+      await until(async () => (await panel()).headline === findingsHeadline(a.findings.length), 60000, `${fmt(a.findings.length)} findings`);
+      await until(async () => !!(await panel()).summary, 30000, "the panel");
       const took = ((Date.now() - t0) / 1000).toFixed(1);
-      // The page may still be laying out every highlight; then it must answer promptly again (no lasting freeze).
       let r0 = Date.now();
       await ui(`1`);
       const busy = Date.now() - r0;
       r0 = Date.now();
       await ui(`1`);
       const rt = Date.now() - r0;
-      const s = await studio();
-      console.log(`    ${name}: ${fmt(text.length)} characters, "${s.headline}", Studio "${s.summary.split("·")[0].trim()}" after ${took} s; busy for ${busy} ms after that, then a UI round trip takes ${rt} ms`);
-      assert(s.headline === "Humanized automatically", `${name}: headline ${JSON.stringify(s.headline)}`);
-      assert(busy < 15000 && rt < 1000, `${name}: the UI is slow to answer (${busy} ms, then ${rt} ms)`);
-      // The prepared text is exactly the humanized copy; the original in the editor is untouched.
-      let got = await copyRevised();
-      assert(got === want.output, `${name}: the prepared text differs from the humanized copy (${got.length} vs ${want.output.length} characters)`);
-      assert((await editorText()) === text, `${name}: the original in the editor changed`);
-      // Restore one change deep inside the document: the 3rd change, then the last one.
+      console.log(`    ${name}: ${fmt(text.length)} characters, ${fmt(a.findings.length)} findings shown after ${took} s; a UI round trip took ${during} ms while checking, ${busy} ms after, then ${rt} ms`);
+      assert(during < 5000 && busy < 15000 && rt < 1000, `${name}: the UI is slow to answer (${during}, ${busy}, then ${rt} ms)`);
+      // Navigate into the document.
       await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), __tw.click("studio-next"), 1)`);
-      await until(async () => /^Change 3 of/.test((await studio()).pos ?? ""), 10000, "change 3 selected");
-      let a0 = Date.now();
-      await ui(`(__tw.click("studio-revert"), 1)`);
-      await ui(`1`);
-      console.log(`    ${name}: restoring one change took ${Date.now() - a0} ms`);
-      await sleep(500);
-      got = await copyRevised();
-      const one = applyReverts(d, new Set([2]));
-      assert(got === one, `${name}: with change 3 kept as original the prepared text differs`);
-      assert(got !== want.output, `${name}: restoring change 3 changed nothing`);
-      // Restore it again (undo), then everything is the humanized copy once more.
-      await ui(`(__tw.click("studio-revert"), 1)`);
-      await sleep(500);
-      assert((await copyRevised()) === want.output, `${name}: undoing the restore did not give back the humanized copy`);
-      await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+      await until(async () => (await panel()).pos === `Finding 3 of ${fmt(a.findings.length)}`, 10000, "finding 3 selected");
+      // Copy text gives back exactly the text.
+      execFileSync("xclip", ["-i", "-selection", "clipboard"], { env, input: "(empty)", stdio: ["pipe", "ignore", "ignore"] });
+      await pressMain("studio-copy");
+      await until(async () => (await panel()).note === "Copied your text.", 20000, "Copy text");
+      assert(clipboard() === text, `${name}: the copied text differs`);
+      assert((await editorText()) === text, `${name}: the text in the editor changed`);
+      await ui(`(__tw.switchByLabel("Check writing style", false), 1)`);
       await sleep(500);
     }
 
-    // Typed for real: a long humanized document (ten paragraphs), with one change kept as original.
+    // Typed for real: a long document (ten paragraphs) with the analysis on.
     const doc = (ROBOTIC + "\n\n").repeat(10).trimEnd();
-    const want = humanize(doc);
-    const d = diffText(want.source, want.output);
-    const expected = applyReverts(d, new Set([1]));
+    const a = analyze(doc);
     await prepare(doc, { seconds: 75, mistakes: "Medium", correction: "Mixed", minimize: true, countdown: 2 });
-    await ui(`(__tw.switchByLabel("Smart Humanization", true), 1)`);
-    await until(async () => (await studio()).headline === "Humanized automatically", 10000, "automatic humanization");
-    await ui(`(__tw.click("studio-next"), __tw.click("studio-next"), 1)`);
-    await until(async () => /^Change 2 of/.test((await studio()).pos ?? ""), 5000, "change 2 selected");
-    await ui(`(__tw.click("studio-revert"), 1)`);
-    await sleep(300);
-    await resetDoc();
-    await ui(`(__tw.click("btn-start"), 1)`);
-    await until(async () => (await state()).status !== "Sent", 5000, "the new session to begin");
-    await sleep(300);
-    await focusDoc();
-    await until(async () => (await state()).status === "Sent", 120000, "completion");
-    const got = await docValue();
-    console.log(`    typed ${fmt(got.length)} characters of a ${fmt(doc.length)}-character humanized document (one change kept as original)`);
-    assert(got === expected, `typed text differs from the prepared text:\n${JSON.stringify(got.slice(0, 300))}\nexpected\n${JSON.stringify(expected.slice(0, 300))}`);
-    assert((await editorText()) === doc, "the original in the editor changed");
+    await ui(`(__tw.switchByLabel("Check writing style", true), 1)`);
+    await until(async () => (await panel()).headline === findingsHeadline(a.findings.length), 10000, "the writing analysis");
+    const got = await typeIt(120000);
+    console.log(`    typed ${fmt(got.length)} characters of a ${fmt(doc.length)}-character document with ${a.findings.length} findings`);
+    assert(got === doc, `typed text differs:\n${JSON.stringify(got.slice(0, 300))}\nexpected\n${JSON.stringify(doc.slice(0, 300))}`);
     await ensureIdle();
-    await ui(`(__tw.switchByLabel("Smart Humanization", false), 1)`);
+    await ui(`(__tw.switchByLabel("Check writing style", false), 1)`);
   });
 
   await check("Caps Lock left on doesn't change the case of what's typed", async () => {

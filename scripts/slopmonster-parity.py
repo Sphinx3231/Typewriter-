@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerates src/humanize/slopmonster/parity.json: what SlopMonster's own deslop.py reports for
+"""Regenerates src/analysis/slopmonster/parity.json: what SlopMonster's own deslop.py reports for
 each input of parity-corpus.json. parity.test.ts then requires the TypeScript port to report
 exactly the same.
 

@@ -1965,8 +1965,8 @@ fieldset:disabled .segmented__opt {
   margin-top: var(--sp-5);
 }
 
-/* ---- Smart Humanization status (under the editor) ---- */
-.humanize {
+/* ---- Writing analysis status (under the editor) ---- */
+.analysis {
   margin-top: 10px;
   padding: 10px 12px;
   border-radius: 10px;
@@ -1974,61 +1974,29 @@ fieldset:disabled .segmented__opt {
   background: var(--surface-2);
   font-size: 13px;
 }
-.humanize--done {
+.analysis--done {
   border-color: color-mix(in srgb, var(--primary) 35%, transparent);
   background: var(--primary-soft);
 }
-.humanize--error {
+.analysis--error {
   border-color: color-mix(in srgb, var(--warning) 35%, transparent);
   background: var(--warning-soft);
 }
-.humanize__line {
+.analysis__line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin: 0;
 }
-.humanize__line svg {
+.analysis__line svg {
   flex: none;
 }
-.humanize--error .humanize__line svg {
+.analysis--error .analysis__line svg {
   color: var(--warning);
 }
-.humanize__detail {
+.analysis__detail {
   color: var(--text-muted);
-}
-.humanize__more {
-  margin-top: 6px;
-}
-.humanize__more summary {
-  cursor: pointer;
-  color: var(--text-muted);
-}
-.humanize__note {
-  margin: 6px 0;
-  color: var(--text-muted);
-}
-.humanize__checks {
-  margin: 6px 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 3px;
-}
-.humanize__checks li {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-}
-.humanize__checks li.is-na {
-  color: var(--text-muted);
-}
-.humanize__checks li.is-flagged svg {
-  color: var(--warning);
-}
-.humanize__checks li > svg {
-  flex: none;
 }
 .prefs__notices {
   margin-top: 8px;
@@ -2045,22 +2013,8 @@ fieldset:disabled .segmented__opt {
   font-size: 0.8em;
   color: var(--text-muted);
 }
-.humanize__src {
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 0.85em;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.humanize__evidence {
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-/* ---- Humanization Studio: what changed, inline ---- */
-/* Its own panel under the editor and playback, spanning both, so "Side by side" has room. */
+/* ---- Writing analysis panel: SlopMonster's findings, inline ---- */
+/* Its own panel under the editor and playback, spanning both, so the text has room. */
 .studio {
   min-width: 0;
   color: var(--text);
@@ -2072,7 +2026,7 @@ fieldset:disabled .segmented__opt {
   outline: none;
   box-shadow: var(--focus-ring), var(--shadow-md);
 }
-.humanize__jump {
+.analysis__jump {
   margin-top: 6px;
 }
 .studio__head {
@@ -2171,21 +2125,8 @@ fieldset:disabled .segmented__opt {
   border-radius: 3px;
   color: var(--text);
 }
-.legend--add {
-  background: var(--diff-add-bg);
-  text-decoration: underline 2px var(--diff-add-line);
-  text-underline-offset: 3px;
-}
-.legend--del {
-  background: var(--diff-del-bg);
-  text-decoration: line-through 2px var(--diff-del-line);
-}
-.legend--fmt {
-  outline: 1.5px dotted var(--diff-fmt-line);
-  outline-offset: -1px;
-}
-.legend--kept {
-  border-bottom: 2px dashed var(--text-subtle);
+.legend.find {
+  cursor: default;
 }
 .studio__body {
   max-height: min(60vh, 560px);
@@ -2201,29 +2142,9 @@ fieldset:disabled .segmented__opt {
   line-height: 1.65;
   font-size: var(--fs-md);
 }
-.studio__split {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.studio__col + .studio__col {
-  border-left: 1px solid var(--border);
-}
-.studio__col-title {
-  position: sticky;
-  top: 0;
-  margin: 0;
-  padding: 6px 12px;
-  font-size: var(--fs-xs);
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
 
-/* One highlighted change. Inline, so the text flows as normal; a button, so it is reachable by keyboard. */
-.chg {
+/* One highlighted finding. Inline, so the text flows as normal; a button, so a click selects it. */
+.find {
   display: inline;
   padding: 0 1px;
   margin: 0;
@@ -2237,70 +2158,47 @@ fieldset:disabled .segmented__opt {
   text-align: inherit;
   cursor: pointer;
 }
-.chg ins,
-.chg del {
-  text-decoration-thickness: 2px;
-}
-.chg--add {
+.find--word {
   background: var(--diff-add-bg);
   color: var(--diff-add-text);
-}
-.chg--add ins {
   text-decoration: underline 2px var(--diff-add-line);
   text-underline-offset: 3px;
 }
-.chg--del {
-  background: var(--diff-del-bg);
-  color: var(--diff-del-text);
-}
-.chg--del del {
-  text-decoration: line-through 2px var(--diff-del-line);
-}
-.chg--fmt {
+.find--shape {
   outline: 1.5px dotted var(--diff-fmt-line);
   outline-offset: -1px;
 }
-.chg--fmt ins,
-.chg--fmt del {
-  text-decoration: none;
-}
-.chg--gone .chg__mark {
-  display: inline-block;
-  min-width: 1.1em;
-  padding: 0 2px;
-  border-radius: 3px;
-  font-size: 0.8em;
-  font-weight: 700;
-  line-height: 1.35;
-  text-align: center;
-  vertical-align: 0.1em;
-  color: var(--diff-del-text);
+.find--claim {
   background: var(--diff-del-bg);
-  border: 1px solid var(--diff-del-line);
+  color: var(--diff-del-text);
 }
-.chg--kept,
-.chg.is-kept {
+/* A stretch inside two findings (a word inside a flagged phrase): a heavier underline. */
+.find.is-nested {
+  text-decoration-thickness: 3px;
+}
+.find.is-reviewed {
+  background: none;
+  color: inherit;
+  outline: 0;
+  text-decoration: none;
   border-bottom: 2px dashed var(--text-subtle);
   border-radius: 0;
 }
-.chg.is-kept del {
-  text-decoration-style: dashed;
-}
-.chg:hover {
+.find:hover {
   box-shadow: 0 0 0 1px var(--diff-selected);
 }
-.chg:focus-visible {
+.find:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
-.chg.is-selected {
+.find.is-selected {
   box-shadow: 0 0 0 2px var(--diff-selected);
 }
 .studio__body[data-highlight="off"] .studio__text {
   color: var(--text);
 }
 
-/* "Changes only" */
+/* "Findings" */
 .studio__list {
   list-style: none;
   margin: 0;
@@ -2348,17 +2246,20 @@ fieldset:disabled .segmented__opt {
   font-size: var(--fs-xs);
   font-weight: 600;
 }
-.studio-item__type--add {
+.studio-item__type--word {
   background: var(--diff-add-bg);
   color: var(--diff-add-text);
 }
-.studio-item__type--del {
+.studio-item__type--shape {
+  outline: 1.5px dotted var(--diff-fmt-line);
+  outline-offset: -1.5px;
+}
+.studio-item__type--claim {
   background: var(--diff-del-bg);
   color: var(--diff-del-text);
 }
-.studio-item__type--fmt {
-  outline: 1.5px dotted var(--diff-fmt-line);
-  outline-offset: -1.5px;
+.studio-item.is-reviewed {
+  opacity: 0.75;
 }
 .studio-item__kept {
   color: var(--text-muted);
@@ -2368,32 +2269,15 @@ fieldset:disabled .segmented__opt {
   overflow-wrap: anywhere;
   line-height: 1.55;
 }
-.studio-item__ctx del,
-.studio__pair del {
-  background: var(--diff-del-bg);
-  color: var(--diff-del-text);
-  text-decoration: line-through 2px var(--diff-del-line);
-  padding: 0 2px;
-  border-radius: 3px;
-}
-.studio-item__ctx ins,
-.studio__pair ins {
-  background: var(--diff-add-bg);
-  color: var(--diff-add-text);
-  text-decoration: underline 2px var(--diff-add-line);
-  text-underline-offset: 3px;
-  padding: 0 2px;
-  border-radius: 3px;
-}
-.studio-item__ctx del + ins {
-  margin-left: 3px;
+.studio-item__ctx .find {
+  cursor: inherit;
 }
 .studio-item__why {
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
-/* The selected change: what and why, without covering the text. */
+/* The selected finding: what and why, without covering the text. */
 .studio__explain {
   padding: 10px 12px;
   border-radius: var(--r-sm);
@@ -2413,13 +2297,18 @@ fieldset:disabled .segmented__opt {
   margin-left: auto;
 }
 .studio__pair,
-.studio__why {
+.studio__why,
+.studio__rule {
   margin: 0;
   overflow-wrap: anywhere;
 }
 .studio__none {
   color: var(--text-muted);
   font-style: italic;
+}
+.studio__rule {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 .studio__actions {
   display: flex;
@@ -2431,16 +2320,9 @@ fieldset:disabled .segmented__opt {
   color: var(--text-muted);
   font-size: var(--fs-sm);
 }
-/* Phones: the two texts stack. */
+/* Phones: the navigation wraps under the view switch. */
 @media (max-width: 640px) {
   .studio__nav {
     margin-left: 0;
-  }
-  .studio__split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .studio__col + .studio__col {
-    border-left: 0;
-    border-top: 1px solid var(--border);
   }
 }

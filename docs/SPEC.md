@@ -59,55 +59,53 @@ The final output must match the original input exactly at the character level, i
 
 Never treat the realism engine as a text-editing or proofreading engine.
 
-# 2a. SMART HUMANIZATION (OPT-IN EXCEPTION TO §2, approved by the owner 2026-10-19)
+# 2a. WRITING ANALYSIS (replaces Smart Humanization, 2026-10-24)
 
-§2 applies whenever Smart Humanization is off, which is the default.
+Writing analysis never changes the text. §2 applies at all times: what is typed is exactly the text in the editor, whether writing analysis is on or off.
 
-When the user turns Smart Humanization on:
-- Every time the text changes, it is checked automatically against a local writing-style checklist. The checks look for:
-  - repetitive wording;
-  - redundant sentences;
-  - formulaic transitions;
-  - generic introductions or conclusions;
-  - overly formal or wordy phrasing;
-  - repetitive sentence structure;
-  - vague statements;
-  - a mismatch with the chosen tone;
-  - from SlopMonster's checker (added 2026-10-23, see `docs/SLOPMONSTER.md`): overused buzzwords (2 or more), stock phrases and constructions such as "not just X, but Y" (2 or more), and tidy lists of three (at least one per 150 words). Words and phrases one of the checks above already counts are not counted again.
-- Two more SlopMonster findings are shown as notes and never scored: dash, hyphen and semicolon habits, and numbers next to a claim ("10,000+ happy customers") to double-check.
-- Score = flagged applicable checks ÷ applicable checks × 100. Only applicable checks count; notes never do. Text too short to judge, or with no applicable check, has no score and is left unchanged.
-- At 50% or more (exactly 50% included), a minimal rule-based rewrite prepares a lightly edited copy. Below 50%, the text is left unchanged. No confirmation is asked.
-- The rewrite must preserve:
-  - meaning, facts, names and numbers;
-  - quotations, citations, URLs and anything in brackets;
-  - line breaks and paragraphs.
-- The rewrite never invents content and never adds mistakes. A safety check compares the protected parts; if they differ, or the engine fails, the original text is typed and the status says so.
-- The score is a writing-style heuristic. It is never presented as detecting AI authorship.
-- The original is immutable. The rewrite is always derived from the original, never from a previous rewrite. The user can inspect both and type the original instead.
-- The final output must equal the prepared text exactly, character for character. Text is never changed during a running session.
-- It runs entirely on the device: no model, no network (CLAUDE.md rule 2).
-- SlopMonster's own rewriting step sends text to an AI model, so it is not used. Its editing guidance is applied only as fixed local rules where the shorter wording means the same in any context: throat-clearing openers ("Here's the thing:", "The truth is,"), stacked hedges ("may potentially"), padding ("very unique", "more than just"), "leverage" used as a verb and "harness the power of". Everything else it finds is reported in the checklist for the writer to judge.
+Smart Humanization (2026-10-19 to 2026-10-23) rewrote text when a local checklist scored 50% or more. It has been removed: no checklist score, no threshold, and no rewrite rules. An older version's choice to turn it on carries over as writing analysis on.
 
-## 2b. Humanization Studio (added 2026-10-20)
+When the user turns on **Check writing style** (Settings › Writing analysis; off by default):
+- The text is checked with SlopMonster's checker (`tools/deslop.py`, MIT, see `docs/SLOPMONSTER.md`), ported rule for rule. The port gives the same report as the Python original on every test input.
+- The check runs again after every change to the text, in a Web Worker off the page's main thread. The desktop app, the web app and the Chrome extension all run the same code; where a Worker isn't available, it runs on the main thread after a tick.
+- A newer text stops a check still running on an older one. A check that crashes, or takes longer than 30 s, is reported as **Writing analysis failed**, with the reason and **Try again**. The text is unaffected either way.
+- It runs entirely on the device: no AI model, no network, and the text is not sent anywhere (CLAUDE.md rule 2).
+- Blank text is not checked. With writing analysis off, nothing is checked at all.
 
-After an automatic rewrite, the Studio shows what changed. It is a presentation layer: it never edits the text it shows.
-- Changes come from a word-level diff of the original and the revised text (Myers, run line by line and then word by word), not from the rewrite marking its own edits.
-- When a block of text is too large or too different for the word-level diff (more than 1,500 word edits, or more than 50,000 characters in one block, such as a long one-paragraph document), it is split into sentences and diffed sentence by sentence: sentence i pairs with sentence i when the counts match, otherwise the sentences are aligned first. Only if that also fails does the block show as one coarser change. Every path is exact: joining the pieces gives back both texts character for character.
-- Three synchronized views: **Final text** (the text that will be typed, changes highlighted inline), **Side by side** (original and revised), and **Original**.
-- The Studio is its own panel below the editor and playback (in windows from 1025 to 1260 px wide, below Settings, so it has the full width). The status line under the editor keeps the score and has **Review the changes**, which scrolls to the Studio. Side by side shows the two texts next to each other when the window is wider than 640 px and stacks them below that, with no horizontal scrolling.
-- Added or reworded text is underlined, removed text is struck through, punctuation and spacing changes are boxed, and kept-original changes have a dashed line. Colors come from the theme (light: blue and purple; dark: orange and red), and every highlight also has a text label for screen readers.
-- The summary (changes, words changed, sentences adjusted, words removed and added) is counted from the diff.
-- Selecting a change explains it. An explanation names a rule only when one of the rewrite's recorded edits really occurs over that spot in the original; rules taken from SlopMonster say so. Otherwise it says "Wording adjusted for flow", "Punctuation adjusted", "Spacing or line breaks adjusted" or "Capitalization adjusted".
+What it reports, in SlopMonster's five categories:
+- **Vocabulary:** listed words and selected word forms.
+- **Sentence patterns:** listed constructions such as "not just X, but Y".
+- **Punctuation:** em dashes or stacked hyphenated compounds in one sentence window, and semicolon density.
+- **Three-item lists:** two specific list shapes.
+- **Possible unsupported proof:** numbers next to nouns such as "customers". The checker can't verify them. **My number claims are backed up** (SlopMonster's `--allow-proof`) keeps these findings but drops their penalty from the score.
+
+How it is reported:
+- The score is SlopMonster's: 5 minus one for each category with a finding.
+- The score and findings describe wording SlopMonster lists as stock or padded. They are never presented as detecting who or what wrote a text, and nothing here aims to make text "undetectable".
+- The patterns are English.
+
+## 2b. Writing analysis panel (replaces the Humanization Studio, 2026-10-24)
+
+- **Status line** under the editor: "Checking writing style…", then either "{N} findings to review" (with the score and the categories found) or "Nothing to review" (score 5/5). It also says "Your text is typed exactly as written." **Review the findings** scrolls to the panel.
+- **Panel** below the editor and playback (in windows from 1025 to 1260 px wide, below Settings, so it has the full width). It shows only when there are findings.
+- **Your text** view: the editor text exactly, with each finding highlighted at the characters SlopMonster matched. The positions come from re-running the checker's own patterns, and they must reproduce its report exactly, or the check fails.
+  - Highlight styles: vocabulary and sentence patterns are shaded and underlined, punctuation and lists get a dotted box, and possible unsupported proof is shaded in the warning color.
+  - A stretch inside two findings belongs to both; a click picks the innermost one.
+  - Colors come from the theme, and every highlight has a text label for screen readers.
+- **Findings** view: every finding in reading order with its category, rule and words, in pages of 200.
+- Selecting a finding shows its category, SlopMonster's rule, and an explanation from SlopMonster's own documentation (README "What it checks", `references/signs-of-ai-writing.md`).
 - Controls:
+  - previous / next finding (also Alt+↑ / Alt+↓);
   - highlights on/off;
-  - all text / changes only;
-  - previous / next change (also Alt+↑ / Alt+↓);
-  - copy original or revised;
-  - restore original;
-  - re-run on the original;
-  - per change, keep the original wording.
-- With changes kept as original, the prepared text is the revised text with exactly those slices of the original put back. It is still what is typed, exactly. Kept choices are cleared when the text, the tone or the result changes, and by a re-run.
-- There is no approval step. While a session runs, nothing that changes the typed text can be used; looking around and copying still work.
+  - mark a finding reviewed (dims it; can be undone; cleared by a new result);
+  - **Copy text**, which copies exactly the text;
+  - **Check again**.
+- Nothing in the panel edits the text, and its markup never reaches the typed output. Writing analysis can be turned on or off during a session; it doesn't change what is typed.
+- Not provided, because nothing is rewritten:
+  - a revised text;
+  - side by side;
+  - per-change restore;
+  - SlopMonster's AI rewrite (`tools/cleanse.sh`).
 
 # 3. BRAND IDENTITY AND VISUAL DIRECTION
 
