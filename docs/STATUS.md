@@ -89,6 +89,13 @@ Verified here: the Linux path passes (closed at once, 4/4 keys kept), and the gu
 - The driver-free diagnostic step is also removed from `desktop.yml`; the corrected upgrade checks cover what it showed.
 - Verified locally after the removal: `cargo check` is clean for Linux and the Windows target, native tests pass 97/97, and the rebuilt, installed `.deb` passes the desktop suite 27/27. Settings changed and the app closed at once are kept (PASS). Windows needs the next CI run.
 
+**Run 46** (`c03923d`, flush removed, release off): CI run 70 green; builds passed on all three platforms.
+- **Installer:** `Typewriter_1.2.0_x64-setup.exe`, 2,844,173 bytes, SHA-256 `0D146C9373DB0C0F188A086BC43B8B69F85A12C0D90D72878948E5AF5E4DC8C7`.
+- **Without the flush, every settings check passed on the real profile:** v1.2.0 control 4/4, upgrade 4/4, new app closed at once 4/4.
+- **Windows end-to-end: 16 of 18 passed.** Writing analysis passed: 5 findings, the panel 729 px wide, no overflow. Neither failure involves the code the commit removed, which only ran at exit. Both are test-harness fixes, committed locally:
+  1. **Emergency stop: "text kept arriving after the emergency stop".** The app and the status window both said "Stopped" at 5%, and the final document ("Emergency stop check. ", 22 characters) matches that. The check read the target's text the moment the status said "stopped", but the target saves its text only every 150 ms, and a key sent just before the stop can still be in Windows' input queue. The pause check already waits 500 ms for this, and now this check does the same. It stays strict: at this test's pace (about 22 characters a second), a typer that kept going would add about 33 characters in the next 1.5 s.
+  2. **The Chrome extension in Opera: "DevTools didn't answer"** (also in runs 32 and 34). The first DevTools call into the freshly loaded service worker was a single 5 s attempt. It now retries for up to 20 s, as the panel-page call right after it already did.
+
 ### Tests (2026-10-24)
 
 - **Unit** (Vitest): **770/770**; lint (tsc) clean. The 500,000-character paragraph is checked and cut for highlighting in about 0.65 s in Node, and the 800-paragraph document (333,541 characters, CRLF) in about 0.36 s. The parity test is unchanged: identical to `deslop.py` on 152 inputs, and the located findings rebuild that report exactly.

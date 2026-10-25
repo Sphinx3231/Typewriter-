@@ -418,11 +418,18 @@ async function operaExtensionCheck(exe, ext, port) {
       return list.find((x) => x.type === "service_worker" && x.url.startsWith("chrome-extension://") && x.url.endsWith("/background.js"));
     }, 30000, "Typewriter's service worker in Opera (the unpacked extension didn't load)");
     const id = new URL(sw.url).host;
-    const apis = await cdpEval(
-      port,
-      sw.url,
-      `(() => { const c = globalThis.chrome || {}, o = globalThis.opr || {};
-        return JSON.stringify({ sidePanel: typeof c.sidePanel, debugger: typeof c.debugger, sidebarAction: typeof o.sidebarAction, ua: navigator.userAgent }); })()`,
+    // A service worker that has just loaded may not answer DevTools at once (runs 32, 34, 46:
+    // "DevTools didn't answer"): ask again, as for the panel page below.
+    const apis = await until(
+      () =>
+        cdpEval(
+          port,
+          sw.url,
+          `(() => { const c = globalThis.chrome || {}, o = globalThis.opr || {};
+            return JSON.stringify({ sidePanel: typeof c.sidePanel, debugger: typeof c.debugger, sidebarAction: typeof o.sidebarAction, ua: navigator.userAgent }); })()`,
+        ),
+      20000,
+      "Typewriter's service worker in Opera to answer DevTools",
     );
     console.log(`    Opera extension APIs: ${apis}`);
     // Open the panel page in a tab, the way a side panel would load it.
@@ -863,6 +870,9 @@ async function main() {
     await until(async () => read("doc").length > 10, 20000, "typing to begin");
     ps("input.ps1", "stopkeys");
     await until(async () => (await hudPhase()) === "stopped", 3000, "the emergency stop");
+    // As in the pause check: the target saves its text every 150 ms, and a key sent just before
+    // the stop may still be in Windows' input queue. Let both settle, then nothing more may arrive.
+    await sleep(500);
     const atStop = read("doc");
     await sleep(1500);
     assert(read("doc") === atStop, "text kept arriving after the emergency stop");
