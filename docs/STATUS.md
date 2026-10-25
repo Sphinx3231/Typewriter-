@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-10-24 (1.2.0 + writing analysis with SlopMonster's checker on branch `ccr-e747ce8b-l498oo`, not merged)_
+_Last updated: 2026-10-25 (1.2.0 + writing analysis with SlopMonster's checker on branch `ccr-e747ce8b-l498oo`, not merged)_
 
 - Live build board: https://claude.ai/artifact/6rEu1C45BZBPPsu2pPXV6p
 - Desktop guide (install, workflow, permissions, limits): [`DESKTOP.md`](DESKTOP.md)
@@ -95,6 +95,48 @@ Verified here: the Linux path passes (closed at once, 4/4 keys kept), and the gu
 - **Windows end-to-end: 16 of 18 passed.** Writing analysis passed: 5 findings, the panel 729 px wide, no overflow. Neither failure involves the code the commit removed, which only ran at exit. Both are test-harness fixes, committed locally:
   1. **Emergency stop: "text kept arriving after the emergency stop".** The app and the status window both said "Stopped" at 5%, and the final document ("Emergency stop check. ", 22 characters) matches that. The check read the target's text the moment the status said "stopped", but the target saves its text only every 150 ms, and a key sent just before the stop can still be in Windows' input queue. The pause check already waits 500 ms for this, and now this check does the same. It stays strict: at this test's pace (about 22 characters a second), a typer that kept going would add about 33 characters in the next 1.5 s.
   2. **The Chrome extension in Opera: "DevTools didn't answer"** (also in runs 32 and 34). The first DevTools call into the freshly loaded service worker was a single 5 s attempt. It now retries for up to 20 s, as the panel-page call right after it already did.
+
+**Independent verification of `44551d3` (2026-10-25, local; Windows and Opera not run here).**
+- **Emergency stop: no race in the app.**
+  - `session.rs` checks for Stop before each event wait, during the modifier wait, and before each key of a burst.
+  - `stop()` publishes "stopped" only after the last key was sent, then returns. So the 500 ms settle in the harness delays only the reading of the document, never the stop.
+  - New native test `the_stopped_update_comes_after_the_last_key_and_counts_every_key_sent`: when "stopped" is published, 4 of 4 keys have been sent, none is sent afterwards, and its progress says 4.
+  - Mutation check: a Stop that publishes "stopped" but keeps typing makes it fail. `session.rs` was restored unchanged.
+  - The stop tests (17) passed 10 times in a row.
+  - The Windows check is now stricter as well. After the stop, the document must be a shorter prefix of the text (mistakes are off), not only unchanged for 1.5 s.
+- **Opera retry: bounded, but it wasn't before this fix.**
+  - `until` retries every 150 ms and fails at its deadline with the last error ("Timed out after 20000 ms … (last error: DevTools didn't answer)"). The assertions after it are unchanged, and `finally` still kills Opera.
+  - `cdpEval` had no timeout on opening the DevTools WebSocket, so one hung handshake could block the retry forever. Opening now fails after 5 s ("DevTools connection didn't open"), and a close before opening fails too.
+  - Checked by running the real `until` + `cdpEval` code from `windows.mjs` (scratch probe):
+
+    | Case | Result |
+    |---|---|
+    | Real Chromium | answered |
+    | Missing worker | failed at 3 s, last error kept |
+    | Hung handshake | failed at 5.2 s; `44551d3`'s version hung until killed |
+    | Opens but never answers | failed at 5.2 s |
+    | Silent twice, then answers | succeeded on the 3rd attempt |
+  - The worst case is the deadline plus one attempt (about 30 s).
+  - Opera isn't available here, so the Opera check itself has **not** run on this code. Opera is installed best effort in CI. If it's missing, the check prints "skipped", never a pass.
+- **Local results on this code** (nothing needed a retry):
+
+  | Suite | Command | Exit | Result |
+  |---|---|---|---|
+  | Native | `npm run test:native` | 0 | 98/98, including the new test |
+  | Unit | `npx vitest run` | 0 | 770/770, 48 files |
+  | Typecheck | `npm run lint` | 0 | clean |
+  | Web build | `npm run build` | 0 | built |
+  | Browser | `npx playwright test` | 0 | 45/45 |
+  | Extension | `npm run test:extension` | 0 | 30/30 |
+  | Package | `npx tauri build --bundles deb` | 0 | `.deb` 3,533,044 B; installed with dpkg |
+  | Packaged desktop | `node e2e-desktop/run.mjs /usr/bin/typewriter` | 0 | 27/27, including quitting mid-session |
+  | Close at once | `upgrade.mjs before`, then `check` | 0, 0 | 4/4 keys kept, PASS; the app exited by itself both times |
+- **Not verified here:**
+  - the Windows end-to-end suite;
+  - the Windows upgrade checks;
+  - the Opera check.
+
+  They run only in the Desktop workflow on GitHub. CI run 70 tested `c03923d`, not `44551d3` or this fix.
 
 ### Tests (2026-10-24)
 

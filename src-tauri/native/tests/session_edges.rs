@@ -562,6 +562,28 @@ fn stop_between_two_keys_ends_the_session() {
 }
 
 #[test]
+fn the_stopped_update_comes_after_the_last_key_and_counts_every_key_sent() {
+    // The app treats the "stopped" update as the end of typing, so no key may be sent after it
+    // and its progress must match what reached the document.
+    let c = Control::default();
+    let d = Scripted::new(&c);
+    d.set(|s| s.hooks.push((3, Hook::Stop)));
+    let at_stop = Arc::new(Mutex::new(None::<(usize, usize)>));
+    let (seen, probe) = (at_stop.clone(), d.clone());
+    let r = Session::new(cfg(typed("abcdefgh", 5.0), 0, 0), d.clone(), c.clone(), Box::new(move |u: Update| {
+        if u.phase == "stopped" {
+            *seen.lock().unwrap() = Some((probe.sent().len(), u.index));
+        }
+    }))
+    .run();
+    assert_eq!(r, "stopped");
+    let (sent_then, index) = at_stop.lock().unwrap().expect("a stopped update");
+    assert_eq!(sent_then, 4, "every key before the stop was sent when \"stopped\" was published");
+    assert_eq!(d.sent().len(), sent_then, "a key was sent after \"stopped\" was published");
+    assert_eq!(index, 4, "the stopped update reports the keys that were sent");
+}
+
+#[test]
 fn the_failsafe_stops_a_session_that_is_typing() {
     let c = Control::default();
     let d = Scripted::new(&c);

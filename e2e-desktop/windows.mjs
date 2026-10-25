@@ -317,8 +317,14 @@ async function cdpEval(port, urlPart, expression) {
   const t = list.find((x) => (x.type === "page" || x.type === "service_worker") && x.url.includes(urlPart));
   if (!t) throw new Error(`no page with ${urlPart} (pages: ${list.map((x) => x.url).join(", ")})`);
   const ws = new WebSocket(t.webSocketDebuggerUrl);
-  await new Promise((ok, fail) => ((ws.onopen = ok), (ws.onerror = () => fail(new Error("DevTools connection failed")))));
   try {
+    // Bounded, so a connection that never opens can't hold a retrying caller past its deadline.
+    await new Promise((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error("DevTools connection didn't open")), 5000);
+      ws.onopen = () => (clearTimeout(timer), ok());
+      ws.onerror = () => (clearTimeout(timer), fail(new Error("DevTools connection failed")));
+      ws.onclose = () => (clearTimeout(timer), fail(new Error("DevTools connection closed")));
+    });
     const res = await new Promise((ok, fail) => {
       const timer = setTimeout(() => fail(new Error("DevTools didn't answer")), 5000);
       ws.onmessage = (m) => {
@@ -864,7 +870,8 @@ async function main() {
 
   await check("emergency stop (Ctrl+Shift+Space) stops typing at once", async () => {
     await clear("doc");
-    await configure("Emergency stop check. ".repeat(20).trim(), { seconds: 20, mistakes: "Off" });
+    const text = "Emergency stop check. ".repeat(20).trim();
+    await configure(text, { seconds: 20, mistakes: "Off" });
     await start();
     await clickInto("doc");
     await until(async () => read("doc").length > 10, 20000, "typing to begin");
@@ -876,6 +883,9 @@ async function main() {
     const atStop = read("doc");
     await sleep(1500);
     assert(read("doc") === atStop, "text kept arriving after the emergency stop");
+    // With mistakes off, what arrived must be exactly the start of the text, and the stop must
+    // have come well before the end.
+    assert(text.startsWith(atStop) && atStop.length < text.length, `after the stop the document isn't a shorter prefix of the text: ${JSON.stringify(atStop)}`);
     shot("win-07-emergency-stop");
   });
 
